@@ -1,0 +1,33 @@
+{
+    "name": "dorpmaster/nats",
+    "type": "project",
+    "description": "Asynchronous client for NATS server.",
+    "keywords": [
+        "amp",
+        "amphp",
+        "async",
+        "client",
+        "nats",
+        "revolt"
+    ],
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Dorpmaster\\Nats\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Roman A. Shvetsov",
+            "email": "tcpu6000@gmail.com"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require": {
+        "php": ">=8.3",
+        "amphp/amp": "^3.0",
+        "amphp/byte-stream": "^2.1",
+        "amphp/socket": "^2.3",
+        "amphp/log": "^2.0"
+    }
+}
