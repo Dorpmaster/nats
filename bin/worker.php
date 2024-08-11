@@ -8,6 +8,7 @@ use Amp\Socket\ConnectContext;
 use Amp\Socket\SocketException;
 use Dorpmaster\Nats\Protocol\ConnectMessage;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
+use Dorpmaster\Nats\Protocol\Metadata\PongMessage;
 use Monolog\Logger;
 use Monolog\Processor\PsrLogMessageProcessor;
 use function Amp\ByteStream\getStderr;
@@ -57,6 +58,9 @@ $socket->write($command);
 while (null !== $string = $socket->read(null, 1024)) {
     $logger->info($string);
     if ($string === "PING\r\n") {
+        $command = (string)(new PongMessage());
+        $logger->debug($command);
+        $socket->write($command);
         $logger->debug('Stopping');
         break;
     }
