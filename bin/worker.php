@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 use Amp\Log\ConsoleFormatter;
 use Amp\Log\StreamHandler;
-use Amp\Parser\Parser;
 use Amp\Socket\ConnectContext;
 use Amp\Socket\SocketException;
+use Dorpmaster\Nats\Protocol\ConnectMessage;
+use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Monolog\Logger;
 use Monolog\Processor\PsrLogMessageProcessor;
-
 use function Amp\ByteStream\getStderr;
 use function Amp\Socket\socketConnector;
 
@@ -23,8 +23,7 @@ $logger = new Logger('worker');
 $logger->pushHandler($logHandler);
 
 $socketContext = (new ConnectContext())
-    ->withConnectTimeout(1)
-;
+    ->withConnectTimeout(1);
 
 $socketConnector = socketConnector();
 
@@ -41,21 +40,26 @@ try {
     exit(1);
 }
 
-$readTimeout = new \Amp\TimeoutCancellation(1);
-while (null !== $string = $socket->read(null, 4)) {
-    $logger->info($string);
-}
+$logger->info($socket->read());
 
-$config = [
-    'verbose' => false,
-    'pedantic' => false,
-    'tls_required' => false,
-    'lang' => 'php',
-    'version' => '1.0.0',
-];
-$command = 'CONNECT ' . json_encode($config) . "\r\n";
+$command = (string) (new ConnectMessage(new ConnectInfo(
+    verbose: false,
+    pedantic: false,
+    tls_required: false,
+    lang: 'php',
+    version: '8.3',
+)));
+
+$logger->debug($command);
+
 $socket->write($command);
 
-$logger->info($socket->read());
+while (null !== $string = $socket->read(null, 1024)) {
+    $logger->info($string);
+    if ($string === "PING\r\n") {
+        $logger->debug('Stopping');
+        break;
+    }
+}
 
 $socket->close();

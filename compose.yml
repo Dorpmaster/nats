@@ -2,7 +2,7 @@ services:
   nats:
     image: nats:alpine
 
-  server:
+  client:
     build:
       context: .
     develop:
