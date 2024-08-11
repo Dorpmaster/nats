@@ -16,6 +16,11 @@
             "Dorpmaster\\Nats\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Dorpmaster\\Nats\\Tests\\": "tests/"
+        }
+    },
     "authors": [
         {
             "name": "Roman A. Shvetsov",
@@ -29,5 +34,13 @@
         "amphp/byte-stream": "^2.1",
         "amphp/socket": "^2.3",
         "amphp/log": "^2.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.3"
+    },
+    "scripts": {
+        "phpunit": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Unit"
+        ]
     }
 }

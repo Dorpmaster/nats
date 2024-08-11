@@ -1,0 +1,21 @@
+services:
+  nats:
+    image: nats:alpine
+
+  server:
+    build:
+      context: .
+    develop:
+      watch:
+        - path: composer.json
+          action: rebuild
+        - path: composer.lock
+          action: rebuild
+        - path: .
+          target: /var/www
+          action: sync+restart
+          ignore:
+            - vendor/
+            - compose.yml
+            - Dockerfile
+            - Makefile

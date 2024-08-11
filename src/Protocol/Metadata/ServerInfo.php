@@ -42,7 +42,7 @@ final readonly class ServerInfo
         public string $version,
         public string $go,
         public string $host,
-        public string $port,
+        public int $port,
         public bool $headers,
         public int $max_payload,
         public int $proto,
