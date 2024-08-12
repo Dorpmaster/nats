@@ -2,12 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Dorpmaster\Nats\Protocol\Metadata;
+namespace Dorpmaster\Nats\Protocol;
 
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
-use Dorpmaster\Nats\Protocol\NatsMessageType;
 
-final class PingMessage implements NatsProtocolMessageInterface
+final class OkMessage implements NatsProtocolMessageInterface
 {
     public function __toString(): string
     {
@@ -20,7 +19,7 @@ final class PingMessage implements NatsProtocolMessageInterface
 
     public function getType(): NatsMessageType
     {
-        return NatsMessageType::PING;
+        return NatsMessageType::OK;
     }
 
     public function getPayload(): string

@@ -8,7 +8,7 @@ use Amp\Socket\ConnectContext;
 use Amp\Socket\SocketException;
 use Dorpmaster\Nats\Protocol\ConnectMessage;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
-use Dorpmaster\Nats\Protocol\Metadata\PongMessage;
+use Dorpmaster\Nats\Protocol\PongMessage;
 use Monolog\Logger;
 use Monolog\Processor\PsrLogMessageProcessor;
 use function Amp\ByteStream\getStderr;
