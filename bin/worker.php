@@ -8,10 +8,13 @@ use Amp\Socket\ConnectContext;
 use Amp\Socket\SocketException;
 use Dorpmaster\Nats\Protocol\ConnectMessage;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
+use Dorpmaster\Nats\Protocol\NatsMessageType;
 use Dorpmaster\Nats\Protocol\PongMessage;
 use Monolog\Logger;
 use Monolog\Processor\PsrLogMessageProcessor;
+use Revolt\EventLoop;
 use function Amp\ByteStream\getStderr;
+use function Amp\delay;
 use function Amp\Socket\socketConnector;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -52,18 +55,22 @@ $command = (string) (new ConnectMessage(new ConnectInfo(
 )));
 
 $logger->debug($command);
-
 $socket->write($command);
 
-while (null !== $string = $socket->read(null, 1024)) {
-    $logger->info($string);
-    if ($string === "PING\r\n") {
-        $command = (string)(new PongMessage());
-        $logger->debug($command);
-        $socket->write($command);
-        $logger->debug('Stopping');
-        break;
+$counter = 0;
+EventLoop::queue(static function () use ($socket, $logger, &$counter): void {
+    while (null !== $chunk = $socket->read()) {
+        $logger->debug($chunk);
+        if(str_contains($chunk, NatsMessageType::PING->value)) {
+            $socket->write((string)(new PongMessage()));
+            $counter++;
+        }
     }
-}
 
-$socket->close();
+    $socket->close();
+});
+
+while ($counter < 3) {
+    $logger->debug('Slipping');
+    delay(3);
+}
