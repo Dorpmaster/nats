@@ -7,10 +7,13 @@ namespace Dorpmaster\Nats\Protocol;
 use Dorpmaster\Nats\Protocol\Contracts\HeaderBugInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
+use Dorpmaster\Nats\Protocol\Internal\IsSubjectCorrect;
 use InvalidArgumentException;
 
 final readonly class HPubMessage implements NatsProtocolMessageInterface, HPubMessageInterface
 {
+    use IsSubjectCorrect;
+
     private int $payloadSize;
     private int $headersSize;
     private int $totalSize;
@@ -23,15 +26,15 @@ final readonly class HPubMessage implements NatsProtocolMessageInterface, HPubMe
     )
     {
         if ($this->headers->count() === 0) {
-            throw new InvalidArgumentException('Headers must not be empty.');
+            throw new InvalidArgumentException('Headers must not be empty');
         }
 
-        if (empty($this->subject)) {
-            throw new InvalidArgumentException('Subject must be non-empty string.');
+        if (!$this->isSubjectCorrect($this->subject)) {
+            throw new InvalidArgumentException(sprintf('Invalid Subject: %s', $this->subject));
         }
 
-        if (($this->replyTo !== null) && empty($this->replyTo)) {
-            throw new InvalidArgumentException('Reply-To must be non-empty string.');
+        if (($this->replyTo !== null) && !$this->isSubjectCorrect($this->replyTo)) {
+            throw new InvalidArgumentException(sprintf('Invalid Reply-To: %s', $this->replyTo));
         }
 
         $this->payloadSize = strlen($this->payload);

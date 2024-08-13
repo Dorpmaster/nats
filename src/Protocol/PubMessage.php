@@ -6,10 +6,12 @@ namespace Dorpmaster\Nats\Protocol;
 
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
+use Dorpmaster\Nats\Protocol\Internal\IsSubjectCorrect;
 use InvalidArgumentException;
 
 final readonly class PubMessage implements NatsProtocolMessageInterface, PubMessageInterface
 {
+    use IsSubjectCorrect;
     private int $payloadSize;
 
     public function __construct(
@@ -20,12 +22,12 @@ final readonly class PubMessage implements NatsProtocolMessageInterface, PubMess
     {
         $this->payloadSize = strlen($this->payload);
 
-        if (empty($this->subject)) {
-            throw new InvalidArgumentException('Subject must be non-empty string.');
+        if (!$this->isSubjectCorrect($this->subject)) {
+            throw new InvalidArgumentException(sprintf('Invalid Subject: %s', $this->subject));
         }
 
-        if (($this->replyTo !== null) && empty($this->replyTo)) {
-            throw new InvalidArgumentException('Reply-To must be non-empty string.');
+        if (($this->replyTo !== null) && !$this->isSubjectCorrect($this->replyTo)) {
+            throw new InvalidArgumentException(sprintf('Invalid Reply-To: %s', $this->replyTo));
         }
     }
 
