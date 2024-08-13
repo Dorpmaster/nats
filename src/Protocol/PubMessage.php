@@ -6,6 +6,7 @@ namespace Dorpmaster\Nats\Protocol;
 
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
+use InvalidArgumentException;
 
 final readonly class PubMessage implements NatsProtocolMessageInterface, PubMessageInterface
 {
@@ -18,6 +19,14 @@ final readonly class PubMessage implements NatsProtocolMessageInterface, PubMess
     )
     {
         $this->payloadSize = strlen($this->payload);
+
+        if (empty($this->subject)) {
+            throw new InvalidArgumentException('Subject must be non-empty string.');
+        }
+
+        if (($this->replyTo !== null) && empty($this->replyTo)) {
+            throw new InvalidArgumentException('Reply-To must be non-empty string.');
+        }
     }
 
     public function __toString(): string
