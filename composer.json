@@ -14,7 +14,10 @@
     "autoload": {
         "psr-4": {
             "Dorpmaster\\Nats\\": "src/"
-        }
+        },
+        "exclude-from-classmap": [
+            "/tests/"
+        ]
     },
     "autoload-dev": {
         "psr-4": {
