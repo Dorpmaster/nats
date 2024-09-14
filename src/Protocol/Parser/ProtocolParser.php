@@ -48,7 +48,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
 
     private static function parseToInfoMessage(string $payload): InfoMessageInterface
     {
-        return new InfoMessage($payload);
+        return new InfoMessage(trim($payload));
     }
 
 }
