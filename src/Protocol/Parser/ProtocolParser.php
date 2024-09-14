@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Protocol\Parser;
 
 use Amp\Parser\Parser;
+use Dorpmaster\Nats\Protocol\Contracts\HeaderBugInterface;
 use Dorpmaster\Nats\Protocol\Contracts\InfoMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\ProtocolParserInterface;
+use Dorpmaster\Nats\Protocol\Header\HeaderBag;
+use Dorpmaster\Nats\Protocol\HMsgMessage;
 use Dorpmaster\Nats\Protocol\InfoMessage;
 use Dorpmaster\Nats\Protocol\MsgMessage;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
@@ -41,6 +44,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
             $message = match ($messageType) {
                 NatsMessageType::INFO => self::parseToInfoMessage(yield NatsProtocolMessageInterface::DELIMITER),
                 NatsMessageType::MSG => yield from self::parseToMsg(),
+                NatsMessageType::HMSG => yield from self::parseToHMsg(),
                 default => throw new \RuntimeException(sprintf('Unknown message type "%s"', $type)),
             };
 
@@ -75,6 +79,31 @@ final readonly class ProtocolParser implements ProtocolParserInterface
         return new MsgMessage(trim($subject), trim($sid), trim($payload), $replyTo ?? null);
     }
 
+    private static function parseToHMsg():\Generator
+    {
+        $metadata = trim(yield NatsProtocolMessageInterface::DELIMITER);
+        $parts = self::extractMetadata($metadata);
+
+        match (count($parts)) {
+            4 => [$subject, $sid, $headersSize, $totalSize] = $parts,
+            5 => [$subject, $sid, $replyTo, $headersSize, $totalSize] = $parts,
+            default => throw new \RuntimeException('Malformed MSG message'),
+        };
+
+        $payloadWithHeaders = trim(yield (int) $totalSize);
+        $headersPayload = substr($payloadWithHeaders, 0, (int) $headersSize);
+        $payload = substr($payloadWithHeaders, (int) $headersSize);
+        $headers = self::parseHeaders($headersPayload);
+
+        if (isset($replyTo)) {
+            $replyTo = trim($replyTo);
+        }
+
+        yield 2; // Remove trailing CRLF
+
+        return new HMsgMessage(trim($subject), trim($sid), trim($payload), $headers, $replyTo ?? null);
+    }
+
     /**
      * Removes all possible whitespaces around message metadata.
      */
@@ -86,5 +115,27 @@ final readonly class ProtocolParser implements ProtocolParserInterface
                 static fn(mixed $value): bool => is_string($value) && trim($value) !== '',
             )
         );
+    }
+
+    private static function parseHeaders(string $payload): HeaderBugInterface
+    {
+        $headers = new HeaderBag();
+
+        foreach (explode(NatsProtocolMessageInterface::DELIMITER, $payload) as $item) {
+            if (str_contains($item, 'NATS/') === true) {
+                continue;
+            }
+
+            $parts = explode(':', $item);
+            if (count($parts) !== 2) {
+                continue;
+            }
+
+            [$key, $value] = $parts;
+
+            $headers->set($key, trim($value), false);
+        }
+
+        return $headers;
     }
 }
