@@ -52,12 +52,12 @@ final readonly class ProtocolParser implements ProtocolParserInterface
             $messageType = NatsMessageType::tryFrom($type);
 
             $message = match ($messageType) {
-                NatsMessageType::INFO => self::parseToInfoMessage(reset($metadata)),
+                NatsMessageType::INFO => self::parseToInfoMessage(implode(' ', $metadata)),
                 NatsMessageType::MSG => yield from self::parseToMsg($metadata),
                 NatsMessageType::HMSG => yield from self::parseToHMsg($metadata),
                 NatsMessageType::PING => new PingMessage(),
                 NatsMessageType::OK => new OkMessage(),
-                NatsMessageType::ERR => new ErrMessage(reset($metadata)),
+                NatsMessageType::ERR => new ErrMessage(implode(' ', $metadata)),
                 default => throw new \RuntimeException(sprintf('Unknown message type "%s"', $type)),
             };
 
