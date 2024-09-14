@@ -152,7 +152,7 @@ final class ParseHMsgMessageTest extends AsyncTestCase
             };
 
             self::expectException(\RuntimeException::class);
-            self::expectExceptionMessage('Malformed MSG message');
+            self::expectExceptionMessage('Malformed HMSG message');
             foreach ($source() as $chunk) {
                 $parser->push($chunk);
             }

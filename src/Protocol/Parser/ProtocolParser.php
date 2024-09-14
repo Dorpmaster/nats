@@ -9,11 +9,14 @@ use Dorpmaster\Nats\Protocol\Contracts\HeaderBugInterface;
 use Dorpmaster\Nats\Protocol\Contracts\InfoMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\ProtocolParserInterface;
+use Dorpmaster\Nats\Protocol\ErrMessage;
 use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\HMsgMessage;
 use Dorpmaster\Nats\Protocol\InfoMessage;
 use Dorpmaster\Nats\Protocol\MsgMessage;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
+use Dorpmaster\Nats\Protocol\OkMessage;
+use Dorpmaster\Nats\Protocol\PingMessage;
 
 final readonly class ProtocolParser implements ProtocolParserInterface
 {
@@ -38,13 +41,23 @@ final readonly class ProtocolParser implements ProtocolParserInterface
     private static function parser(\Closure $callback): \Generator
     {
         while (true) {
-            $type = yield ' ';
+            $chunk = yield NatsProtocolMessageInterface::DELIMITER;
+
+            $metadata = self::extractMetadata($chunk);
+            if (count($metadata) === 0) {
+                throw new \RuntimeException('Received a malformed message');
+            }
+
+            $type = array_shift($metadata);
             $messageType = NatsMessageType::tryFrom($type);
 
             $message = match ($messageType) {
-                NatsMessageType::INFO => self::parseToInfoMessage(yield NatsProtocolMessageInterface::DELIMITER),
-                NatsMessageType::MSG => yield from self::parseToMsg(),
-                NatsMessageType::HMSG => yield from self::parseToHMsg(),
+                NatsMessageType::INFO => self::parseToInfoMessage(reset($metadata)),
+                NatsMessageType::MSG => yield from self::parseToMsg($metadata),
+                NatsMessageType::HMSG => yield from self::parseToHMsg($metadata),
+                NatsMessageType::PING => new PingMessage(),
+                NatsMessageType::OK => new OkMessage(),
+                NatsMessageType::ERR => new ErrMessage(reset($metadata)),
                 default => throw new \RuntimeException(sprintf('Unknown message type "%s"', $type)),
             };
 
@@ -54,40 +67,38 @@ final readonly class ProtocolParser implements ProtocolParserInterface
 
     private static function parseToInfoMessage(string $payload): InfoMessageInterface
     {
-        return new InfoMessage(trim($payload));
+        return new InfoMessage($payload);
     }
 
-    private static function parseToMsg():\Generator
+    /**
+     * @param array<string> $metadata
+     * @return \Generator
+     */
+    private static function parseToMsg(array $metadata): \Generator
     {
-        $metadata = trim(yield NatsProtocolMessageInterface::DELIMITER);
-        $parts = self::extractMetadata($metadata);
-
-        match (count($parts)) {
-            3 => [$subject, $sid, $size] = $parts,
-            4 => [$subject, $sid, $replyTo, $size] = $parts,
+        match (count($metadata)) {
+            3 => [$subject, $sid, $size] = $metadata,
+            4 => [$subject, $sid, $replyTo, $size] = $metadata,
             default => throw new \RuntimeException('Malformed MSG message'),
         };
 
-        $payload = trim(yield (int) $size);
-
-        if (isset($replyTo)) {
-            $replyTo = trim($replyTo);
-        }
+        $payload = yield (int) $size;
 
         yield 2; // Remove trailing CRLF
 
-        return new MsgMessage(trim($subject), trim($sid), trim($payload), $replyTo ?? null);
+        return new MsgMessage($subject, $sid, $payload, $replyTo ?? null);
     }
 
-    private static function parseToHMsg():\Generator
+    /**
+     * @param array<string> $metadata
+     * @return \Generator
+     */
+    private static function parseToHMsg(array $metadata): \Generator
     {
-        $metadata = trim(yield NatsProtocolMessageInterface::DELIMITER);
-        $parts = self::extractMetadata($metadata);
-
-        match (count($parts)) {
-            4 => [$subject, $sid, $headersSize, $totalSize] = $parts,
-            5 => [$subject, $sid, $replyTo, $headersSize, $totalSize] = $parts,
-            default => throw new \RuntimeException('Malformed MSG message'),
+        match (count($metadata)) {
+            4 => [$subject, $sid, $headersSize, $totalSize] = $metadata,
+            5 => [$subject, $sid, $replyTo, $headersSize, $totalSize] = $metadata,
+            default => throw new \RuntimeException('Malformed HMSG message'),
         };
 
         $payloadWithHeaders = trim(yield (int) $totalSize);
@@ -95,24 +106,22 @@ final readonly class ProtocolParser implements ProtocolParserInterface
         $payload = substr($payloadWithHeaders, (int) $headersSize);
         $headers = self::parseHeaders($headersPayload);
 
-        if (isset($replyTo)) {
-            $replyTo = trim($replyTo);
-        }
-
         yield 2; // Remove trailing CRLF
 
-        return new HMsgMessage(trim($subject), trim($sid), trim($payload), $headers, $replyTo ?? null);
+        return new HMsgMessage($subject, $sid, $payload, $headers, $replyTo ?? null);
     }
 
     /**
      * Removes all possible whitespaces around message metadata.
+     *
+     * @return list<string>
      */
     private static function extractMetadata(string $metadata): array
     {
         return array_values(
             array_filter(
-                explode(' ', $metadata),
-                static fn(mixed $value): bool => is_string($value) && trim($value) !== '',
+                array_map('trim', explode(' ', $metadata)),
+                static fn(string $value): bool => trim($value) !== '',
             )
         );
     }
