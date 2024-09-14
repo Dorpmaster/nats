@@ -68,4 +68,51 @@ final class ParseInfoMessageTest extends AsyncTestCase
             }
         });
     }
+
+    public function testBrokenPayload(): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function () {
+            $callback = function (NatsProtocolMessageInterface $message): void {
+                self::assertInstanceOf(InfoMessage::class, $message);
+            };
+
+            $parser = new ProtocolParser($callback);
+
+            $source = function (): \Generator {
+                yield 'INFO {"server_id":"NABGL'.NatsProtocolMessageInterface::DELIMITER;
+            };
+
+            self::expectException(\JsonException::class);
+            foreach ($source() as $chunk) {
+                $parser->push($chunk);
+            }
+
+            $parser->cancel();
+        });
+    }
+
+    public function testWrongType(): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function () {
+            $callback = function (NatsProtocolMessageInterface $message): void {
+                self::assertInstanceOf(InfoMessage::class, $message);
+            };
+
+            $parser = new ProtocolParser($callback);
+
+            $source = function (): \Generator {
+                yield 'TEST test'.NatsProtocolMessageInterface::DELIMITER;
+            };
+
+            self::expectException(\RuntimeException::class);
+            self::expectExceptionMessage('Unknown message type "TEST"');
+            foreach ($source() as $chunk) {
+                $parser->push($chunk);
+            }
+
+            $parser->cancel();
+        });
+    }
 }
