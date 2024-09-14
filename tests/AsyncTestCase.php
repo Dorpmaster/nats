@@ -20,8 +20,6 @@ use function Amp\now;
  */
 abstract class AsyncTestCase extends TestCase
 {
-    private const int RUNTIME_PRECISION = 2;
-
     private DeferredFuture $deferredFuture;
 
     private string $timeoutId;

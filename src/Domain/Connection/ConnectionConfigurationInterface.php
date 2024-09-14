@@ -9,4 +9,6 @@ interface ConnectionConfigurationInterface
     public function getHost(): string;
 
     public function getPort(): int;
+
+    public function getQueueBufferSize(): int;
 }

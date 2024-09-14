@@ -12,7 +12,7 @@ final readonly class ServerInfo
      * @param string $version The version of NATS.
      * @param string $go The version of golang the NATS server was built with.
      * @param string $host The IP address used to start the NATS server.
-     * @param string $port The port number the NATS server is configured to listen on.
+     * @param int $port The port number the NATS server is configured to listen on.
      * @param bool $headers Whether the server supports headers.
      * @param int $max_payload Maximum payload size, in bytes, that the server will accept from the client.
      * @param int $proto An integer indicating the protocol version of the server.
@@ -24,8 +24,8 @@ final readonly class ServerInfo
      * during the TLS handshake.
      * @param bool|null $tls_available (optional) If this is true, the client can provide a valid certificate
      * during the TLS handshake.
-     * @param array<non-empty-string>|null $connect_urls (optional) List of server urls that a client can connect to.
-     * @param array<non-empty-string>|null $ws_connect_urls (optional) List of server urls that a websocket client
+     * @param array<string>|null $connect_urls (optional) List of server urls that a client can connect to.
+     * @param array<string>|null $ws_connect_urls (optional) List of server urls that a websocket client
      * can connect to.
      * @param bool|null $ldm (optional) If the server supports Lame Duck Mode notifications, and the current
      * server has transitioned to lame duck, ldm will be set to true.
