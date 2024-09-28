@@ -18,5 +18,6 @@ final class ConnectionConfigurationTest extends TestCase
 
         self::assertSame('some.server.test', $configuration->getHost());
         self::assertSame(4222, $configuration->getPort());
+        self::assertSame(1000, $configuration->getQueueBufferSize());
     }
 }

@@ -14,6 +14,7 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
+use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Throwable;
@@ -31,7 +32,7 @@ final class Connection implements ConnectionInterface
     {
     }
 
-    public function open(Cancellation|NULL $cancellation = null): void
+    public function open(Cancellation|null $cancellation = null): void
     {
         if (!$this->isClosed()) {
             $this->logger?->warning('Connection is already opened');
@@ -76,24 +77,29 @@ final class Connection implements ConnectionInterface
         $this->logger->debug('Enabling a microtask that processes the incoming stream');
         EventLoop::queue(static function () use ($socket, $queue, $logger): void {
             try {
+                $parser = new ProtocolParser($queue->push(...));
+
                 $logger?->debug('Reading the socket');
 
                 while (null !== $chunk = $socket?->read()) {
                     $logger?->debug('A new chunk has received', ['chunk' => $chunk]);
 
-                    $queue->push($chunk);
+                    $parser->push($chunk);
 
-                    $logger?->debug('Chunk has added to the queue');
+                    $logger?->debug('Chunk has processed with the parser');
                 }
+
+                $logger?->debug('Cancelling the parser');
+                $parser->cancel();
+
+                $logger?->debug('Completing the queue');
+                $queue->complete();
             } catch (Throwable $e) {
                 $logger?->error('An exception has occurred while reading the incoming stream', [
                     'exception' => $e,
                 ]);
                 $queue->error($e);
             } finally {
-                $logger?->debug('Completing the queue');
-                $queue->complete();
-
                 $logger?->debug('Stopping read the socket');
                 $socket?->close();
             }
@@ -114,7 +120,7 @@ final class Connection implements ConnectionInterface
         }
     }
 
-    public function receive(Cancellation|null $cancellation = null): string|null
+    public function receive(Cancellation|null $cancellation = null): NatsProtocolMessageInterface|null
     {
         return ($this->iterator?->continue($cancellation) ?? false)
             ? $this->iterator->getValue()

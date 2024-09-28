@@ -13,7 +13,7 @@ interface ConnectionInterface
     /**
      * @throws ConnectionException
      */
-    public function open(Cancellation|NULL $cancellation = null): void;
+    public function open(Cancellation|null $cancellation = null): void;
 
     public function close(): void;
 
@@ -22,7 +22,7 @@ interface ConnectionInterface
     /**
      * @throws ConnectionException
      */
-    public function receive(Cancellation|null $cancellation = null): string|null;
+    public function receive(Cancellation|null $cancellation = null): NatsProtocolMessageInterface|null;
 
     /**
      * @throws ConnectionException
