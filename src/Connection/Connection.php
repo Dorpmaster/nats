@@ -130,7 +130,7 @@ final class Connection implements ConnectionInterface
     public function send(NatsProtocolMessageInterface $message): void
     {
         try {
-            $this->socket?->write($message->getPayload());
+            $this->socket?->write((string) $message);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception has occurred while writing the socket', [
                 'exception' => $exception,
