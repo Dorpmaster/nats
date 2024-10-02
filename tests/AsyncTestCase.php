@@ -124,4 +124,15 @@ abstract class AsyncTestCase extends TestCase
 
         EventLoop::unreference($this->timeoutId);
     }
+
+    /**
+     * Forces an extra tick of the event loop to ensure any callbacks are
+     * processed to the event loop handler before start assertions.
+     */
+    final protected function forceTick(): void
+    {
+        $deferred = new DeferredFuture();
+        EventLoop::defer(static fn () => $deferred->complete());
+        $deferred->getFuture()->await();
+    }
 }
