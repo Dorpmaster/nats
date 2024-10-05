@@ -14,14 +14,14 @@ use function Amp\async;
 use function Amp\delay;
 use function Amp\Future\awaitAll;
 
-final class ConnectionConnectTest extends AsyncTestCase
+final class ConnectionDisconnectTest extends AsyncTestCase
 {
-    public function testWaitForConnected(): void
+    public function testWaitForDisconnected(): void
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
             $connection = self::createMock(ConnectionInterface::class);
-            $connection->method('open')
+            $connection->method('close')
                 ->willReturnCallback(static function(): void {
                     delay(1);
                 });
@@ -38,10 +38,12 @@ final class ConnectionConnectTest extends AsyncTestCase
                 $this->logger,
             );
 
+            $client->connect();
+
             awaitAll([
-                async($client->connect(...)),
-                async($client->connect(...)),
-                async($client->connect(...)),
+                async($client->disconnect(...)),
+                async($client->disconnect(...)),
+                async($client->disconnect(...)),
             ]);
 
             self::assertTrue(true);

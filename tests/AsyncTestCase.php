@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Tests;
 
+use Amp\Log\ConsoleFormatter;
+use Amp\Log\StreamHandler;
+use Monolog\Logger;
+use Monolog\Processor\PsrLogMessageProcessor;
 use PHPUnit\Framework\AssertionFailedError;
 use Amp\DeferredFuture;
 use Amp\Future;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Revolt\EventLoop\Driver\TracingDriver;
 use Throwable;
 
 use function Amp\async;
-use function Amp\now;
+use function Amp\ByteStream\getStderr;
 
 /**
  * Provides the ability to test asynchronous code.
@@ -25,6 +30,8 @@ abstract class AsyncTestCase extends TestCase
     private string $timeoutId;
 
     private bool $setUpInvoked = false;
+
+    protected LoggerInterface $logger;
 
     protected function setUp(): void
     {
@@ -38,6 +45,16 @@ abstract class AsyncTestCase extends TestCase
 
             $this->deferredFuture->error(new UnhandledException($exception));
         });
+
+        $this->logger = self::createMock(LoggerInterface::class);
+        if ($_SERVER['TEST_DEBUG_LOGGER'] ?? false) {
+            $logHandler = new StreamHandler(getStderr());
+            $logHandler->pushProcessor(new PsrLogMessageProcessor());
+            $logHandler->setFormatter(new ConsoleFormatter());
+
+            $this->logger = new Logger($this->name());
+            $this->logger->pushHandler($logHandler);
+        }
     }
 
     final protected function runAsyncTest(\Closure $test): void
@@ -65,9 +82,7 @@ abstract class AsyncTestCase extends TestCase
 
                         // Force an extra tick of the event loop to ensure any uncaught exceptions are
                         // forwarded to the event loop handler before the test ends.
-                        $deferred = new DeferredFuture();
-                        EventLoop::defer(static fn () => $deferred->complete());
-                        $deferred->getFuture()->await();
+                        $this->forceTick();
                     } finally {
                         if (!$this->deferredFuture->isComplete()) {
                             $this->deferredFuture->complete();

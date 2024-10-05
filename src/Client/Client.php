@@ -7,6 +7,7 @@ namespace Dorpmaster\Nats\Client;
 use Amp\Cancellation;
 use Amp\CancelledException;
 use Amp\TimeoutCancellation;
+use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
@@ -25,6 +26,7 @@ final class Client implements ClientInterface
     private string $status;
 
     public function __construct(
+        private readonly ClientConfigurationInterface $configuration,
         private readonly Cancellation $cancellation,
         private readonly ConnectionInterface $connection,
         private readonly EventDispatcherInterface $eventDispatcher,
@@ -34,10 +36,6 @@ final class Client implements ClientInterface
         $this->status = self::DISCONNECTED;
     }
 
-    /**
-     * @throws CancelledException
-     * @throws ConnectionException
-     */
     public function connect(): void
     {
         $this->logger?->debug('Opening a new connection');
@@ -45,8 +43,14 @@ final class Client implements ClientInterface
         try {
             $status = match ($this->status) {
                 self::CONNECTED => self::CONNECTED,
-                self::CONNECTING => $this->waitForStatus(self::CONNECTED),
-                self::DISCONNECTING => $this->waitForStatus(self::DISCONNECTED),
+                self::CONNECTING => $this->waitForStatus(
+                    self::CONNECTED,
+                    $this->configuration->getWaitForStatusTimeout(),
+                ),
+                self::DISCONNECTING => $this->waitForStatus(
+                    self::DISCONNECTED,
+                    $this->configuration->getWaitForStatusTimeout(),
+                ),
                 self::DISCONNECTED => self::DISCONNECTED,
                 default => null,
             };
@@ -81,6 +85,9 @@ final class Client implements ClientInterface
             $this->connection->open($this->cancellation);
             $this->logger?->debug('Connection has successfully opened');
         } catch (ConnectionException $exception) {
+            $this->status = self::DISCONNECTED;
+            $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
             $this->logger?->error($exception->getMessage(),[
                 'exception' => $exception,
             ]);
@@ -93,10 +100,56 @@ final class Client implements ClientInterface
         $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
     }
 
+    public function disconnect(): void
+    {
+        $this->logger?->debug('Closing the connection');
+
+        try {
+            $status = match ($this->status) {
+                self::CONNECTED => self::CONNECTED,
+                self::CONNECTING => $this->waitForStatus(self::CONNECTED),
+                self::DISCONNECTING => $this->waitForStatus(self::DISCONNECTED),
+                self::DISCONNECTED => self::DISCONNECTED,
+                default => null,
+            };
+        } catch (CancelledException $exception) {
+            $this->logger?->error($exception->getMessage(), [
+                'exception' => $exception,
+            ]);
+
+            throw $exception;
+        }
+
+        $this->logger?->debug(sprintf('Status of the connection: %s', $status));
+
+        if (!in_array($status, [self::CONNECTED, self::DISCONNECTED])) {
+            $this->logger?->error('Wrong connection status. Disconnection process terminated',[
+                'status' => $this->status,
+            ]);
+
+            throw new ConnectionException(sprintf('Wrong connection status: %s', $status));
+        }
+
+        if ($status === self::DISCONNECTED) {
+            $this->logger?->debug('Connection already closed');
+            return;
+        }
+
+        $this->status = self::DISCONNECTING;
+        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+        $this->logger?->debug('Set status to "DISCONNECTING"');
+
+        $this->connection->close();
+        $this->logger?->debug('Connection has successfully closed');
+        $this->status = self::DISCONNECTED;
+        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+    }
+
+
     /**
      * @throws CancelledException
      */
-    private function waitForStatus(string $status, float $timeout = 30): string
+    private function waitForStatus(string $status, float $timeout = 10): string
     {
         $this->logger?->debug('Waiting for the connection status', [
             'status' => $status,
