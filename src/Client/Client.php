@@ -6,9 +6,11 @@ namespace Dorpmaster\Nats\Client;
 
 use Amp\Cancellation;
 use Amp\CancelledException;
+use Amp\DeferredFuture;
 use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
+use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
@@ -25,11 +27,17 @@ final class Client implements ClientInterface
 
     private string $status;
 
+    /**
+     * A signal indicating that there are messages being processed.
+     */
+    private DeferredFuture|null $deferredDispatching = null;
+
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
         private readonly Cancellation $cancellation,
         private readonly ConnectionInterface $connection,
         private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly MessageDispatcherInterface $messageDispatcher,
         private readonly LoggerInterface|null $logger = null,
     )
     {
@@ -78,8 +86,8 @@ final class Client implements ClientInterface
         }
 
         $this->status = self::CONNECTING;
-        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
         $this->logger?->debug('Set status to "CONNECTING"');
+        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
 
         try {
             $this->connection->open($this->cancellation);
@@ -98,6 +106,75 @@ final class Client implements ClientInterface
         $this->status = self::CONNECTED;
         $this->logger?->debug('Set status to "CONNECTED"');
         $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+        $this->logger?->debug('Starting a microtask that processes the messages');
+        EventLoop::queue(function () {
+            $this->logger?->debug('Starting to processes the messages');
+            while ($this->status === self::CONNECTED) {
+                /**
+                 * Setting the signal to be able to wait for the finish of the dispatched message processing
+                 * while the connection is closing
+                 */
+                $this->deferredDispatching = new DeferredFuture();
+
+                $this->logger?->debug('Getting a message');
+                $message = $this->connection->receive($this->cancellation);
+
+                if ($message === null) {
+                    $this->logger?->debug('No messages received');
+                    $this->deferredDispatching->complete();
+
+                    continue;
+                }
+
+                try {
+                    $this->logger?->debug('Dispatching the message', [
+                        'message' => $message,
+                    ]);
+
+                    $response = $this->messageDispatcher->dispatch($message);
+                } catch (\Throwable $exception) {
+                    $this->logger?->error('An exception was thrown during dispatching the message', [
+                        'exception' => $exception,
+                        'message' => $message,
+                    ]);
+                    $this->deferredDispatching->complete();
+
+                    continue;
+                }
+
+                if ($response !== null) {
+                    try {
+                        $this->logger?->debug('Sending the response message', [
+                            'message' => $response,
+                        ]);
+
+                        if ($this->connection->isClosed()) {
+                            $this->logger?->error(
+                                'Could not send the response message because the connection has already closed'
+                            );
+                            $this->deferredDispatching->complete();
+
+                            continue;
+                        }
+
+                        $this->connection->send($response);
+                        $this->deferredDispatching->complete();
+
+                        $this->logger?->debug('Response message has successfully sent');
+                    } catch (\Throwable $exception) {
+                        $this->logger?->error('An exception was thrown during sending the response message', [
+                            'exception' => $exception,
+                            'message' => $message,
+                        ]);
+                    }
+                }
+
+                if ($this->deferredDispatching->isComplete() === false) {
+                    $this->deferredDispatching->complete();
+                }
+            }
+        });
     }
 
     public function disconnect(): void
@@ -136,13 +213,34 @@ final class Client implements ClientInterface
         }
 
         $this->status = self::DISCONNECTING;
-        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
         $this->logger?->debug('Set status to "DISCONNECTING"');
+        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+        if ($this->deferredDispatching?->isComplete() === false) {
+            $this->logger?->debug('Waiting for the finish of the dispatched message processing');
+
+            try {
+                $this->deferredDispatching?->getFuture()
+                    ->await(new TimeoutCancellation(10));
+
+                $this->logger?->debug('Dispatched message processing has finished');
+            } catch (\Throwable $exception) {
+                $this->logger?->error(
+                    'Time is over while waiting for the finish of the dispatched message processing',
+                    [
+                        'exception' => $exception,
+                    ]
+                );
+            }
+        }
 
         $this->connection->close();
-        $this->logger?->debug('Connection has successfully closed');
         $this->status = self::DISCONNECTED;
+        $this->logger?->debug('Set status to "DISCONNECTED"');
+
         $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+        $this->logger?->debug('Connection has successfully closed');
     }
 
 
@@ -167,7 +265,8 @@ final class Client implements ClientInterface
         );
 
         $logger = $this->logger;
-        $this->eventDispatcher->subscribe(
+
+        $subId = $this->eventDispatcher->subscribe(
             self::STATUS_EVENT_NAME,
             static function (string $eventName, mixed $payload) use (
                 $suspension,
@@ -194,6 +293,13 @@ final class Client implements ClientInterface
             }
         );
 
-        return $suspension->suspend();
+        $status = $suspension->suspend();
+        $this->logger?->debug('Got the status', [
+            'status' => $status,
+        ]);
+
+        $this->eventDispatcher->unsubscribe($subId);
+
+        return $status;
     }
 }

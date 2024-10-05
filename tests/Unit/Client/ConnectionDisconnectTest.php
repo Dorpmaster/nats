@@ -7,12 +7,15 @@ namespace Dorpmaster\Nats\Tests\Unit\Client;
 use Amp\NullCancellation;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
+use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
+use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
+use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Tests\AsyncTestCase;
 use function Amp\async;
 use function Amp\delay;
-use function Amp\Future\awaitAll;
+use function Amp\Future\await;
 
 final class ConnectionDisconnectTest extends AsyncTestCase
 {
@@ -20,27 +23,48 @@ final class ConnectionDisconnectTest extends AsyncTestCase
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
+            $isClosed = true;
+
             $connection = self::createMock(ConnectionInterface::class);
-            $connection->method('close')
-                ->willReturnCallback(static function(): void {
-                    delay(1);
+            $connection->method('open')
+                ->willReturnCallback(static function() use (&$isClosed): void {
+                    $isClosed = false;
                 });
 
+            $connection = self::createMock(ConnectionInterface::class);
+            $connection->method('close')
+                ->willReturnCallback(static function() use (&$isClosed): void {
+                    delay(0.1);
+                    $isClosed = true;
+                });
+
+            $connection->method('isClosed')
+                ->willReturnCallback(static function() use (&$isClosed): bool {
+                    return $isClosed;
+                });
+
+            $connection->method('receive')
+                ->willReturnCallback(static function(): NatsProtocolMessageInterface {
+                    return async(static fn(): NatsProtocolMessageInterface => new PingMessage())->await();
+                });
+
+            $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
             $configuration = new ClientConfiguration();
             $cancellation = new NullCancellation();
             $eventDispatcher = new EventDispatcher();
 
             $client = new Client(
-                $configuration,
-                $cancellation,
-                $connection,
-                $eventDispatcher,
-                $this->logger,
+                configuration: $configuration,
+                cancellation: $cancellation,
+                connection: $connection,
+                eventDispatcher: $eventDispatcher,
+                messageDispatcher: $messageDispatcher,
+                logger: $this->logger,
             );
 
             $client->connect();
 
-            awaitAll([
+            await([
                 async($client->disconnect(...)),
                 async($client->disconnect(...)),
                 async($client->disconnect(...)),
