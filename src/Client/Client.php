@@ -16,6 +16,7 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
+use function Amp\delay;
 
 final class Client implements ClientInterface
 {
@@ -111,14 +112,20 @@ final class Client implements ClientInterface
         EventLoop::queue(function () {
             $this->logger?->debug('Starting to processes the messages');
             while ($this->status === self::CONNECTED) {
+                $this->logger?->debug('Getting a message');
+                try {
+                    $message = $this->connection->receive($this->cancellation);
+                } catch (CancelledException) {
+                    $this->logger?->info('Received a termination signal. Stopping to process the messages.');
+
+                    return;
+                }
+
                 /**
                  * Setting the signal to be able to wait for the finish of the dispatched message processing
                  * while the connection is closing
                  */
                 $this->deferredDispatching = new DeferredFuture();
-
-                $this->logger?->debug('Getting a message');
-                $message = $this->connection->receive($this->cancellation);
 
                 if ($message === null) {
                     $this->logger?->debug('No messages received');
@@ -159,7 +166,6 @@ final class Client implements ClientInterface
                         }
 
                         $this->connection->send($response);
-                        $this->deferredDispatching->complete();
 
                         $this->logger?->debug('Response message has successfully sent');
                     } catch (\Throwable $exception) {
@@ -240,7 +246,22 @@ final class Client implements ClientInterface
 
         $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
 
-        $this->logger?->debug('Connection has successfully closed');
+        $this->logger?->info('Connection has successfully closed');
+    }
+
+    public function waitForTermination(): void
+    {
+        $suspension = EventLoop::getSuspension();
+        $this->cancellation->subscribe(function() use ($suspension): void {
+            $this->logger?->debug('Got termination signal. Resuming the process');
+
+            $suspension->resume();
+        });
+
+        $this->logger?->debug('Suspending the process.');
+        $suspension->suspend();
+        // Workaround to give control to EventLoop.
+        delay(0.1);
     }
 
 

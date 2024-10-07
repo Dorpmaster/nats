@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Connection;
 
 use Amp\Cancellation;
+use Amp\CancelledException;
 use Amp\Pipeline\ConcurrentIterator;
 use Amp\Pipeline\Queue;
 use Amp\Socket\ConnectContext;
@@ -75,13 +76,13 @@ final class Connection implements ConnectionInterface
         $logger = $this->logger;
 
         $this->logger->debug('Enabling a microtask that processes the incoming stream');
-        EventLoop::queue(static function () use ($socket, $queue, $logger): void {
+        EventLoop::queue(static function () use ($socket, $queue, $logger, $cancellation): void {
             try {
                 $parser = new ProtocolParser($queue->push(...));
 
                 $logger?->debug('Reading the socket');
 
-                while (null !== $chunk = $socket?->read()) {
+                while (null !== $chunk = $socket?->read($cancellation)) {
                     $logger?->debug('A new chunk has received', ['chunk' => $chunk]);
 
                     $parser->push($chunk);
@@ -93,6 +94,9 @@ final class Connection implements ConnectionInterface
                 $parser->cancel();
 
                 $logger?->debug('Completing the queue');
+                $queue->complete();
+            } catch (CancelledException) {
+                $logger?->info('Received a termination signal. Completing the queue.');
                 $queue->complete();
             } catch (Throwable $e) {
                 $logger?->error('An exception has occurred while reading the incoming stream', [

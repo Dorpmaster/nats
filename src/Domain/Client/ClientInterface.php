@@ -21,4 +21,6 @@ interface ClientInterface
      * @throws ConnectionException
      */
     public function disconnect(): void;
+
+    public function waitForTermination(): void;
 }
