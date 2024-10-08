@@ -35,7 +35,7 @@ abstract class AsyncTestCase extends TestCase
 
     protected function setUp(): void
     {
-        $this->setUpInvoked = true;
+        $this->setUpInvoked   = true;
         $this->deferredFuture = new DeferredFuture();
 
         EventLoop::setErrorHandler(function (Throwable $exception): void {

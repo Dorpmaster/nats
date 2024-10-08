@@ -16,21 +16,20 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
+
 use function Amp\delay;
 
 final class Client implements ClientInterface
 {
-    private const string CONNECTED = 'CONNECTED';
-    private const string CONNECTING = 'CONNECTING';
-    private const string DISCONNECTED = 'DISCONNECTED';
-    private const string DISCONNECTING = 'DISCONNECTING';
+    private const string CONNECTED         = 'CONNECTED';
+    private const string CONNECTING        = 'CONNECTING';
+    private const string DISCONNECTED      = 'DISCONNECTED';
+    private const string DISCONNECTING     = 'DISCONNECTING';
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
 
     private string $status;
 
-    /**
-     * A signal indicating that there are messages being processed.
-     */
+     // A signal indicating that there are messages being processed.
     private DeferredFuture|null $deferredDispatching = null;
 
     public function __construct(
@@ -40,8 +39,7 @@ final class Client implements ClientInterface
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly MessageDispatcherInterface $messageDispatcher,
         private readonly LoggerInterface|null $logger = null,
-    )
-    {
+    ) {
         $this->status = self::DISCONNECTED;
     }
 
@@ -74,7 +72,7 @@ final class Client implements ClientInterface
         $this->logger?->debug(sprintf('Status of the connection: %s', $status));
 
         if (!in_array($status, [self::CONNECTED, self::DISCONNECTED])) {
-            $this->logger?->error('Wrong connection status. Connection process terminated',[
+            $this->logger?->error('Wrong connection status. Connection process terminated', [
                 'status' => $this->status,
             ]);
 
@@ -97,7 +95,7 @@ final class Client implements ClientInterface
             $this->status = self::DISCONNECTED;
             $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
 
-            $this->logger?->error($exception->getMessage(),[
+            $this->logger?->error($exception->getMessage(), [
                 'exception' => $exception,
             ]);
 
@@ -206,7 +204,7 @@ final class Client implements ClientInterface
         $this->logger?->debug(sprintf('Status of the connection: %s', $status));
 
         if (!in_array($status, [self::CONNECTED, self::DISCONNECTED])) {
-            $this->logger?->error('Wrong connection status. Disconnection process terminated',[
+            $this->logger?->error('Wrong connection status. Disconnection process terminated', [
                 'status' => $this->status,
             ]);
 
@@ -252,7 +250,7 @@ final class Client implements ClientInterface
     public function waitForTermination(): void
     {
         $suspension = EventLoop::getSuspension();
-        $this->cancellation->subscribe(function() use ($suspension): void {
+        $this->cancellation->subscribe(function () use ($suspension): void {
             $this->logger?->debug('Got termination signal. Resuming the process');
 
             $suspension->resume();
@@ -279,7 +277,7 @@ final class Client implements ClientInterface
             $timeout,
             sprintf('Operation timed out while waiting for the connection status "%s"', $status),
         );
-        $suspension = EventLoop::getSuspension();
+        $suspension   = EventLoop::getSuspension();
 
         $cancellationId = $cancellation->subscribe(
             static fn(CancelledException $exception): never => $suspension->throw($exception)
@@ -289,7 +287,10 @@ final class Client implements ClientInterface
 
         $subId = $this->eventDispatcher->subscribe(
             self::STATUS_EVENT_NAME,
-            static function (string $eventName, mixed $payload) use (
+            static function (
+                string $eventName,
+                mixed $payload
+            ) use (
                 $suspension,
                 $status,
                 $cancellationId,

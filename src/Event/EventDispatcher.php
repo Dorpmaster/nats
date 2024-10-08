@@ -12,7 +12,7 @@ use Revolt\EventLoop;
 final class EventDispatcher implements EventDispatcherInterface
 {
     private array $callbacks = [];
-    private string $nextId = 'a';
+    private string $nextId   = 'a';
 
 
     public function dispatch(string $eventName, mixed $payload = null): void

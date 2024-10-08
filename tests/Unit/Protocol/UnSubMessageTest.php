@@ -14,12 +14,11 @@ final class UnSubMessageTest extends TestCase
 {
     #[DataProvider('dataProvider')]
     public function testPayload(
-        string      $sid,
+        string $sid,
         int|null $max,
-        string      $toString,
+        string $toString,
         string|null $error = null,
-    ): void
-    {
+    ): void {
         if ($error !== null) {
             self::expectException(InvalidArgumentException::class);
             self::expectExceptionMessage($error);

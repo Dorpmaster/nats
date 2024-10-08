@@ -6,5 +6,4 @@ namespace Dorpmaster\Nats\Domain\Connection;
 
 final class ConnectionException extends \Exception
 {
-
 }

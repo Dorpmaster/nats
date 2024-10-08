@@ -48,7 +48,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
                 throw new \RuntimeException('Received a malformed message');
             }
 
-            $type = array_shift($metadata);
+            $type        = array_shift($metadata);
             $messageType = NatsMessageType::tryFrom($type);
 
             $message = match ($messageType) {
@@ -77,7 +77,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
     private static function parseToMsg(array $metadata): \Generator
     {
         match (count($metadata)) {
-            3 => [$subject, $sid, $size] = $metadata,
+            3 => [$subject, $sid, $size]           = $metadata,
             4 => [$subject, $sid, $replyTo, $size] = $metadata,
             default => throw new \RuntimeException('Malformed MSG message'),
         };
@@ -96,15 +96,15 @@ final readonly class ProtocolParser implements ProtocolParserInterface
     private static function parseToHMsg(array $metadata): \Generator
     {
         match (count($metadata)) {
-            4 => [$subject, $sid, $headersSize, $totalSize] = $metadata,
+            4 => [$subject, $sid, $headersSize, $totalSize]           = $metadata,
             5 => [$subject, $sid, $replyTo, $headersSize, $totalSize] = $metadata,
             default => throw new \RuntimeException('Malformed HMSG message'),
         };
 
         $payloadWithHeaders = trim(yield (int) $totalSize);
-        $headersPayload = substr($payloadWithHeaders, 0, (int) $headersSize);
-        $payload = substr($payloadWithHeaders, (int) $headersSize);
-        $headers = self::parseHeaders($headersPayload);
+        $headersPayload     = substr($payloadWithHeaders, 0, (int) $headersSize);
+        $payload            = substr($payloadWithHeaders, (int) $headersSize);
+        $headers            = self::parseHeaders($headersPayload);
 
         yield 2; // Remove trailing CRLF
 

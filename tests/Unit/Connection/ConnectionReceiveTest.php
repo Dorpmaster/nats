@@ -24,7 +24,7 @@ final class ConnectionReceiveTest extends AsyncTestCase
 
             $socket = self::createMock(Socket::class);
             $socket->method('isClosed')
-                ->willReturnCallback(static function() use (&$isSocketClosed): bool {
+                ->willReturnCallback(static function () use (&$isSocketClosed): bool {
                     return $isSocketClosed;
                 });
 
@@ -42,7 +42,7 @@ final class ConnectionReceiveTest extends AsyncTestCase
             $connector = self::createMock(SocketConnector::class);
             $connector->method('connect')
                 ->with('test.nats.local:4222')
-                ->willReturnCallback(static function () use($socket, &$isSocketClosed): Socket {
+                ->willReturnCallback(static function () use ($socket, &$isSocketClosed): Socket {
                     $isSocketClosed = false;
 
                     return $socket;

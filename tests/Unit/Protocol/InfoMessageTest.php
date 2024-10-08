@@ -18,8 +18,7 @@ final class InfoMessageTest extends TestCase
         string $payload,
         string $toString,
         string|null $exception = null
-    ): void
-    {
+    ): void {
         if ($exception !== null) {
             self::expectException(InvalidArgumentException::class);
             self::expectExceptionMessage($exception);
@@ -38,11 +37,11 @@ final class InfoMessageTest extends TestCase
         return [
             'full' => [
                 '{"server_id":"NBYQVR2I5KUG5I6FN2YNFAPP5GVWF6V7QYGFK2VSKQDOY5ZYC2Y7QAZO","server_name":"us-south-nats-demo","version":"2.10.18","proto":1,"git_commit":"57d23ac","go":"go1.22.5","host":"0.0.0.0","port":4222,"headers":true,"tls_available":true,"max_payload":1048576,"jetstream":true,"client_id":793982,"client_ip":"94.67.65.133","nonce":"KHC0jVIt4_Na7XI","xkey":"XBSKODUWHKUXOLWU6EUGS2UXHOVOGBYQJ322OJ4DS4PB72HQRGEU5T7U"}',
-                'INFO {"server_id":"NBYQVR2I5KUG5I6FN2YNFAPP5GVWF6V7QYGFK2VSKQDOY5ZYC2Y7QAZO","server_name":"us-south-nats-demo","version":"2.10.18","proto":1,"git_commit":"57d23ac","go":"go1.22.5","host":"0.0.0.0","port":4222,"headers":true,"tls_available":true,"max_payload":1048576,"jetstream":true,"client_id":793982,"client_ip":"94.67.65.133","nonce":"KHC0jVIt4_Na7XI","xkey":"XBSKODUWHKUXOLWU6EUGS2UXHOVOGBYQJ322OJ4DS4PB72HQRGEU5T7U"}'."\r\n",
+                'INFO {"server_id":"NBYQVR2I5KUG5I6FN2YNFAPP5GVWF6V7QYGFK2VSKQDOY5ZYC2Y7QAZO","server_name":"us-south-nats-demo","version":"2.10.18","proto":1,"git_commit":"57d23ac","go":"go1.22.5","host":"0.0.0.0","port":4222,"headers":true,"tls_available":true,"max_payload":1048576,"jetstream":true,"client_id":793982,"client_ip":"94.67.65.133","nonce":"KHC0jVIt4_Na7XI","xkey":"XBSKODUWHKUXOLWU6EUGS2UXHOVOGBYQJ322OJ4DS4PB72HQRGEU5T7U"}' . "\r\n",
             ],
             'only-required' => [
                 '{"server_id":"NBYQVR2I5KUG5I6FN2YNFAPP5GVWF6V7QYGFK2VSKQDOY5ZYC2Y7QAZO","server_name":"us-south-nats-demo","version":"2.10.18","proto":1,"go":"go1.22.5","host":"0.0.0.0","port":4222,"headers":true,"max_payload":1048576}',
-                'INFO {"server_id":"NBYQVR2I5KUG5I6FN2YNFAPP5GVWF6V7QYGFK2VSKQDOY5ZYC2Y7QAZO","server_name":"us-south-nats-demo","version":"2.10.18","proto":1,"go":"go1.22.5","host":"0.0.0.0","port":4222,"headers":true,"max_payload":1048576}'."\r\n",
+                'INFO {"server_id":"NBYQVR2I5KUG5I6FN2YNFAPP5GVWF6V7QYGFK2VSKQDOY5ZYC2Y7QAZO","server_name":"us-south-nats-demo","version":"2.10.18","proto":1,"go":"go1.22.5","host":"0.0.0.0","port":4222,"headers":true,"max_payload":1048576}' . "\r\n",
             ],
             'missed-server_id' => [
                 '{"server_name":"us-south-nats-demo","version":"2.10.18","proto":1,"go":"go1.22.5","host":"0.0.0.0","port":4222,"headers":true,"max_payload":1048576}',

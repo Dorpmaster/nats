@@ -14,8 +14,7 @@ final readonly class InfoMessage implements NatsProtocolMessageInterface, InfoMe
     private ServerInfo $serverInfo;
     public function __construct(
         private string $payload,
-    )
-    {
+    ) {
         $options = json_decode($this->payload, true, 512, JSON_THROW_ON_ERROR);
 
         $this->serverInfo = new ServerInfo(

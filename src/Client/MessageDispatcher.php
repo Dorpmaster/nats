@@ -26,8 +26,7 @@ final class MessageDispatcher implements MessageDispatcherInterface
     public function __construct(
         private readonly ConnectInfo $connectInfo,
         private readonly LoggerInterface|null $logger = null,
-    )
-    {
+    ) {
     }
 
 

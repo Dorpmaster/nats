@@ -12,14 +12,14 @@ use InvalidArgumentException;
 final readonly class PubMessage implements NatsProtocolMessageInterface, PubMessageInterface
 {
     use IsSubjectCorrect;
+
     private int $payloadSize;
 
     public function __construct(
-        private string      $subject,
-        private string      $payload,
+        private string $subject,
+        private string $payload,
         private string|null $replyTo = null,
-    )
-    {
+    ) {
         $this->payloadSize = strlen($this->payload);
 
         if (!$this->isSubjectCorrect($this->subject)) {

@@ -15,13 +15,12 @@ final class SubMessageTest extends TestCase
 {
     #[DataProvider('dataProvider')]
     public function testPayload(
-        string      $subject,
-        string      $sid,
+        string $subject,
+        string $sid,
         string|null $queueGroup,
-        string      $toString,
+        string $toString,
         string|null $error = null,
-    ): void
-    {
+    ): void {
         if ($error !== null) {
             self::expectException(InvalidArgumentException::class);
             self::expectExceptionMessage($error);

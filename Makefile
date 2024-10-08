@@ -45,3 +45,31 @@ test:
 		--volume $(HOME)/.cache/composer}:/tmp \
 		--user $(id -u):$(id -g) \
 		composer phpunit
+
+.PHONY: phpcs
+phpcs:
+	docker run --rm --interactive --tty \
+    	--volume $(PWD):/app \
+    	--user $(id -u):$(id -g) \
+    	composer composer phpcs
+
+.PHONY: phpcs-file
+phpcs-file:
+	docker run --rm --interactive --tty \
+    	--volume $(PWD):/app \
+    	--user $(id -u):$(id -g) \
+    	composer composer phpcs:file $(RUN_ARGS)
+
+.PHONY: phpcs-fix
+phpcs-fix:
+	docker run --rm --interactive --tty \
+    	--volume $(PWD):/app \
+    	--user $(id -u):$(id -g) \
+    	composer composer phpcs:fix
+
+.PHONY: phpcs-fix-file
+phpcs-fix-file:
+	docker run --rm --interactive --tty \
+    	--volume $(PWD):/app \
+    	--user $(id -u):$(id -g) \
+    	composer composer phpcs:fix:file $(RUN_ARGS)

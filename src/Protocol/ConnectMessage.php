@@ -13,8 +13,7 @@ final readonly class ConnectMessage implements NatsProtocolMessageInterface, Con
     private string $payload;
     public function __construct(
         private ConnectInfo $connectInfo,
-    )
-    {
+    ) {
         $options = [
             'verbose' => $this->connectInfo->verbose,
             'pedantic' => $this->connectInfo->pedantic,

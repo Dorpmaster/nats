@@ -111,7 +111,7 @@ final class ConnectionSendTest extends TestCase
             ->willReturn($socket);
 
         $configuration = self::createMock(ConnectionConfigurationInterface::class);
-        $logger = self::createMock(LoggerInterface::class);
+        $logger        = self::createMock(LoggerInterface::class);
 
         $connection = new Connection(
             $connector,

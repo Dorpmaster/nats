@@ -39,11 +39,34 @@
         "amphp/log": "^2.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "^11.3"
+        "phpunit/phpunit": "^11.3",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "phpcompatibility/php-compatibility": "^9.3"
     },
     "scripts": {
         "phpunit": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Unit"
+        ],
+        "phpcs": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcs src tests -ps"
+        ],
+        "phpcs:file": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcs -ps"
+        ],
+        "phpcs:fix": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcbf src tests -ps"
+        ],
+        "phpcs:fix:file": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcbf -ps"
         ]
+    },
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
     }
 }

@@ -61,7 +61,6 @@ final readonly class ServerInfo
         public string|null $nonce = null,
         public string|null $cluster = null,
         public string|null $domain = null,
-    )
-    {
+    ) {
     }
 }

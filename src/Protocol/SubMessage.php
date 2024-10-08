@@ -16,11 +16,10 @@ final readonly class SubMessage implements NatsProtocolMessageInterface, SubMess
     use IsSidCorrect;
 
     public function __construct(
-        private string      $subject,
-        private string      $sid,
+        private string $subject,
+        private string $sid,
         private string|null $queueGroup = null,
-    )
-    {
+    ) {
         if (!$this->isSubjectCorrect($this->subject)) {
             throw new InvalidArgumentException(sprintf('Invalid Subject: %s', $this->subject));
         }

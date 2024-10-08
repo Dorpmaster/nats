@@ -32,10 +32,13 @@ final class EventDispatcherTest extends AsyncTestCase
 
             $callback = static function (
                 string $eventName,
-                mixed  $payload,
-            ) use (&$testEventName, &$testPayload): void {
+                mixed $payload,
+            ) use (
+                &$testEventName,
+                &$testPayload
+): void {
                 $testEventName = $eventName;
-                $testPayload = $payload;
+                $testPayload   = $payload;
             };
 
             $dispatcher->subscribe('NoPayload', $callback);
@@ -63,10 +66,13 @@ final class EventDispatcherTest extends AsyncTestCase
 
             $callback = static function (
                 string $eventName,
-                mixed  $payload,
-            ) use (&$testEventName, &$testPayload): void {
+                mixed $payload,
+            ) use (
+                &$testEventName,
+                &$testPayload
+): void {
                 $testEventName = $eventName;
-                $testPayload = $payload;
+                $testPayload   = $payload;
             };
 
             $dispatcher->subscribe('NoPayload', $callback);

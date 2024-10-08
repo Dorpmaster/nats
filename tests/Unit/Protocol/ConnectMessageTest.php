@@ -17,8 +17,7 @@ final class ConnectMessageTest extends TestCase
         ConnectInfo $connectInfo,
         string $payload,
         string $toString,
-    ): void
-    {
+    ): void {
         $message = new ConnectMessage($connectInfo);
         self::assertSame($toString, (string)$message);
         self::assertSame(NatsMessageType::CONNECT, $message->getType());
@@ -48,7 +47,7 @@ final class ConnectMessageTest extends TestCase
                     nkey: 'key',
                 ),
                 '{"verbose":false,"pedantic":false,"tls_required":false,"lang":"php",""version":"8.3","auth_token":"token","user":"user","pass":"password","name":"test client","protocol":1,"echo":false,"sig":"signature","jwt":"jwt","no_responders":false,"headers":true,"nkey":"key"}',
-                'CONNECT {"verbose":false,"pedantic":false,"tls_required":false,"lang":"php","version":"8.3","auth_token":"token","user":"user","pass":"password","name":"test client","protocol":1,"echo":false,"sig":"signature","jwt":"jwt","no_responders":false,"headers":true,"nkey":"key"}'."\r\n",
+                'CONNECT {"verbose":false,"pedantic":false,"tls_required":false,"lang":"php","version":"8.3","auth_token":"token","user":"user","pass":"password","name":"test client","protocol":1,"echo":false,"sig":"signature","jwt":"jwt","no_responders":false,"headers":true,"nkey":"key"}' . "\r\n",
             ],
             'only-required' => [
                 new ConnectInfo(
@@ -59,7 +58,7 @@ final class ConnectMessageTest extends TestCase
                     version: '8.3',
                 ),
                 '{"verbose":false,"pedantic":false,"tls_required":false,"lang":"php","version":"8.3"}',
-                'CONNECT {"verbose":false,"pedantic":false,"tls_required":false,"lang":"php","version":"8.3"}'."\r\n",
+                'CONNECT {"verbose":false,"pedantic":false,"tls_required":false,"lang":"php","version":"8.3"}' . "\r\n",
             ],
         ];
     }

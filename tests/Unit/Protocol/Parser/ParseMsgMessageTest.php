@@ -17,7 +17,7 @@ final class ParseMsgMessageTest extends AsyncTestCase
         $this->runAsyncTest(function () {
             $isParsed = false;
 
-            $callback = function (MsgMessageInterface $message) use(&$isParsed): void {
+            $callback = function (MsgMessageInterface $message) use (&$isParsed): void {
                 self::assertInstanceOf(MsgMessage::class, $message);
 
                 self::assertSame('FOO.BAR', $message->getSubject());
@@ -53,7 +53,7 @@ final class ParseMsgMessageTest extends AsyncTestCase
         $this->runAsyncTest(function () {
             $isParsed = false;
 
-            $callback = function (MsgMessageInterface $message) use(&$isParsed): void {
+            $callback = function (MsgMessageInterface $message) use (&$isParsed): void {
                 self::assertInstanceOf(MsgMessage::class, $message);
 
                 self::assertSame('FOO.BAR', $message->getSubject());
@@ -89,7 +89,7 @@ final class ParseMsgMessageTest extends AsyncTestCase
         $this->runAsyncTest(function () {
             $isParsed = false;
 
-            $callback = function (MsgMessageInterface $message) use(&$isParsed): void {
+            $callback = function (MsgMessageInterface $message) use (&$isParsed): void {
                 self::assertInstanceOf(MsgMessage::class, $message);
 
                 self::assertSame('FOO.BAR', $message->getSubject());

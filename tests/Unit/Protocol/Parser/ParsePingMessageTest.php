@@ -18,7 +18,7 @@ final class ParsePingMessageTest extends AsyncTestCase
         $this->runAsyncTest(function () {
             $isParsed = false;
 
-            $callback = function (NatsProtocolMessageInterface $message) use(&$isParsed): void {
+            $callback = function (NatsProtocolMessageInterface $message) use (&$isParsed): void {
                 self::assertInstanceOf(PingMessage::class, $message);
 
                 $isParsed = true;
@@ -53,7 +53,7 @@ final class ParsePingMessageTest extends AsyncTestCase
             $parser = new ProtocolParser($callback);
 
             $source = function (): \Generator {
-                yield '{"server_id":"NABGL'.NatsProtocolMessageInterface::DELIMITER;
+                yield '{"server_id":"NABGL' . NatsProtocolMessageInterface::DELIMITER;
             };
 
             self::expectException(\RuntimeException::class);
@@ -77,7 +77,7 @@ final class ParsePingMessageTest extends AsyncTestCase
             $parser = new ProtocolParser($callback);
 
             $source = function (): \Generator {
-                yield 'TEST test'.NatsProtocolMessageInterface::DELIMITER;
+                yield 'TEST test' . NatsProtocolMessageInterface::DELIMITER;
             };
 
             self::expectException(\RuntimeException::class);

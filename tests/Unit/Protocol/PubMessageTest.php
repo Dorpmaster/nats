@@ -14,13 +14,12 @@ final class PubMessageTest extends TestCase
 {
     #[DataProvider('dataProvider')]
     public function testPayload(
-        string      $payload,
-        string      $subject,
+        string $payload,
+        string $subject,
         string|null $replyTo,
-        string      $toString,
+        string $toString,
         string|null $error = null,
-    ): void
-    {
+    ): void {
         if ($error !== null) {
             self::expectException(InvalidArgumentException::class);
             self::expectExceptionMessage($error);

@@ -18,7 +18,7 @@ final class ParseInfoMessageTest extends AsyncTestCase
         $this->runAsyncTest(function () {
             $isParsed = false;
 
-            $callback = function (NatsProtocolMessageInterface $message) use(&$isParsed): void {
+            $callback = function (NatsProtocolMessageInterface $message) use (&$isParsed): void {
                 self::assertInstanceOf(InfoMessage::class, $message);
 
                 /** @var ServerInfo $serverInfo */
@@ -80,7 +80,7 @@ final class ParseInfoMessageTest extends AsyncTestCase
             $parser = new ProtocolParser($callback);
 
             $source = function (): \Generator {
-                yield 'INFO {"server_id":"NABGL'.NatsProtocolMessageInterface::DELIMITER;
+                yield 'INFO {"server_id":"NABGL' . NatsProtocolMessageInterface::DELIMITER;
             };
 
             self::expectException(\JsonException::class);
@@ -103,7 +103,7 @@ final class ParseInfoMessageTest extends AsyncTestCase
             $parser = new ProtocolParser($callback);
 
             $source = function (): \Generator {
-                yield 'TEST test'.NatsProtocolMessageInterface::DELIMITER;
+                yield 'TEST test' . NatsProtocolMessageInterface::DELIMITER;
             };
 
             self::expectException(\RuntimeException::class);

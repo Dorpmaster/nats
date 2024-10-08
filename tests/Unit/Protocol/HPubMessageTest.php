@@ -16,14 +16,13 @@ final class HPubMessageTest extends TestCase
 {
     #[DataProvider('dataProvider')]
     public function testPayload(
-        string      $payload,
-        string      $subject,
+        string $payload,
+        string $subject,
         HeaderBugInterface $headers,
         string|null $replyTo,
-        string      $toString,
+        string $toString,
         string|null $error = null,
-    ): void
-    {
+    ): void {
         if ($error !== null) {
             self::expectException(InvalidArgumentException::class);
             self::expectExceptionMessage($error);
@@ -41,7 +40,7 @@ final class HPubMessageTest extends TestCase
         }
 
         $headersSize = strlen((string) $headers) + 4;
-        $totalSize =  $headersSize + strlen($payload);
+        $totalSize   =  $headersSize + strlen($payload);
 
         self::assertSame($toString, (string)$message);
         self::assertSame(NatsMessageType::HPUB, $message->getType());

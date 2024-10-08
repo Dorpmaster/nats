@@ -19,12 +19,11 @@ final readonly class HPubMessage implements NatsProtocolMessageInterface, HPubMe
     private int $totalSize;
 
     public function __construct(
-        private string             $subject,
-        private string             $payload,
+        private string $subject,
+        private string $payload,
         private HeaderBugInterface $headers,
-        private string|null        $replyTo = null,
-    )
-    {
+        private string|null $replyTo = null,
+    ) {
         if ($this->headers->count() === 0) {
             throw new InvalidArgumentException('Headers must not be empty');
         }
@@ -40,7 +39,7 @@ final readonly class HPubMessage implements NatsProtocolMessageInterface, HPubMe
         $this->payloadSize = strlen($this->payload);
         // The size of the headers section in bytes including the ␍␊␍␊ delimiter before the payload.
         $this->headersSize = strlen((string) $this->headers) + 4;
-        $this->totalSize = $this->payloadSize + $this->headersSize;
+        $this->totalSize   = $this->payloadSize + $this->headersSize;
     }
 
     public function __toString(): string

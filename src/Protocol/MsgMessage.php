@@ -18,12 +18,11 @@ final readonly class MsgMessage implements NatsProtocolMessageInterface, MsgMess
     private int $payloadSize;
 
     public function __construct(
-        private string      $subject,
-        private string      $sid,
-        private string      $payload,
+        private string $subject,
+        private string $sid,
+        private string $payload,
         private string|null $replyTo = null,
-    )
-    {
+    ) {
         $this->payloadSize = strlen($this->payload);
 
         if (!$this->isSubjectCorrect($this->subject)) {

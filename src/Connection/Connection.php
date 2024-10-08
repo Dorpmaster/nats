@@ -22,15 +22,14 @@ use Throwable;
 
 final class Connection implements ConnectionInterface
 {
-    private Socket|null $socket = null;
+    private Socket|null $socket               = null;
     private ConcurrentIterator|null $iterator = null;
 
     public function __construct(
-        private readonly SocketConnector                  $connector,
+        private readonly SocketConnector $connector,
         private readonly ConnectionConfigurationInterface $configuration,
-        private readonly LoggerInterface|null             $logger = null,
-    )
-    {
+        private readonly LoggerInterface|null $logger = null,
+    ) {
     }
 
     public function open(Cancellation|null $cancellation = null): void
@@ -69,7 +68,7 @@ final class Connection implements ConnectionInterface
 
         $this->logger?->debug('Creating a new queue for incoming data');
 
-        $queue = new Queue($this->configuration->getQueueBufferSize());
+        $queue          = new Queue($this->configuration->getQueueBufferSize());
         $this->iterator = $queue->iterate();
 
         $socket = $this->socket;

@@ -64,8 +64,7 @@ final class HeaderBugTest extends TestCase
         string|array $value,
         string|array $expectedValue,
         string|null $exception = null,
-    ): void
-    {
+    ): void {
         $bag = new HeaderBag();
 
         if ($exception !== null) {

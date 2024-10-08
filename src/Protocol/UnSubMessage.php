@@ -14,10 +14,9 @@ final readonly class UnSubMessage implements NatsProtocolMessageInterface, UnSub
     use IsSidCorrect;
 
     public function __construct(
-        private string      $sid,
+        private string $sid,
         private int|null $maxMessages = null,
-    )
-    {
+    ) {
         if (!$this->isSidCorrect($this->sid)) {
             throw new InvalidArgumentException(sprintf('Invalid SID: %s', $this->sid));
         }

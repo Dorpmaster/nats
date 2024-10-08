@@ -48,7 +48,6 @@ final readonly class ConnectInfo
         public bool|null $no_responders = null,
         public bool|null $headers = null,
         public string|null $nkey = null,
-    )
-    {
+    ) {
     }
 }

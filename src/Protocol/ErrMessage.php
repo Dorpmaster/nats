@@ -10,8 +10,7 @@ final readonly class ErrMessage implements NatsProtocolMessageInterface
 {
     public function __construct(
         private string $payload,
-    )
-    {
+    ) {
     }
 
     public function __toString(): string
