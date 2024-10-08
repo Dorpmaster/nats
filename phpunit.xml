@@ -15,6 +15,18 @@
         <server name="SYMFONY_PHPUNIT_VERSION" value="11" />
     </php>
 
+<!--    <coverage>-->
+<!--        <report>-->
+<!--            <html outputDirectory="phpunit.coverage"/>-->
+<!--        </report>-->
+<!--    </coverage>-->
+
+<!--    <source>-->
+<!--        <include>-->
+<!--            <directory>src</directory>-->
+<!--        </include>-->
+<!--    </source>-->
+
     <testsuites>
         <testsuite name="Full">
             <directory>tests</directory>

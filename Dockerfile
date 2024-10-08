@@ -13,6 +13,7 @@ RUN set -eux; \
     install-php-extensions \
         pcntl \
     	event \
+        pcov \
     ;
 
 COPY --from=composer /composer /usr/local/bin/

@@ -40,11 +40,12 @@ composer:
 
 .PHONY: test
 test:
-	docker run --rm --interactive --tty \
+	docker compose run --rm --interactive \
 		--volume $(PWD):/app \
 		--volume $(HOME)/.cache/composer}:/tmp \
 		--user $(id -u):$(id -g) \
-		composer phpunit
+		--workdir /app \
+		client composer phpunit
 
 .PHONY: phpcs
 phpcs:
