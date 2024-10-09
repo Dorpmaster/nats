@@ -7,7 +7,6 @@ namespace Dorpmaster\Nats\Tests\Unit\Protocol\Parser;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\OkMessage;
 use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
-use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Tests\AsyncTestCase;
 
 final class ParseOkMessageTest extends AsyncTestCase

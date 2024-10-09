@@ -12,16 +12,15 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\PingMessage;
-use Dorpmaster\Nats\Protocol\PongMessage;
 use Dorpmaster\Nats\Tests\AsyncTestCase;
 
 use function Amp\async;
 use function Amp\delay;
 use function Amp\Future\await;
 
-final class ConnectionConnectTest extends AsyncTestCase
+final class ClientDisconnectTest extends AsyncTestCase
 {
-    public function testWaitForConnected(): void
+    public function testWaitForDisconnected(): void
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
@@ -30,12 +29,13 @@ final class ConnectionConnectTest extends AsyncTestCase
             $connection = self::createMock(ConnectionInterface::class);
             $connection->method('open')
                 ->willReturnCallback(static function () use (&$isClosed): void {
-                    delay(0.1);
                     $isClosed = false;
                 });
 
+            $connection = self::createMock(ConnectionInterface::class);
             $connection->method('close')
                 ->willReturnCallback(static function () use (&$isClosed): void {
+                    delay(0.1);
                     $isClosed = true;
                 });
 
@@ -46,18 +46,13 @@ final class ConnectionConnectTest extends AsyncTestCase
 
             $connection->method('receive')
                 ->willReturnCallback(static function (): NatsProtocolMessageInterface {
-                    return async(static function (): NatsProtocolMessageInterface {
-                        return new PingMessage();
-                    })->await();
+                    return async(static fn(): NatsProtocolMessageInterface => new PingMessage())->await();
                 });
 
             $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
-            $messageDispatcher->method('dispatch')
-                ->willReturn(new PongMessage());
-
-            $configuration   = new ClientConfiguration();
-            $cancellation    = new NullCancellation();
-            $eventDispatcher = new EventDispatcher();
+            $configuration     = new ClientConfiguration();
+            $cancellation      = new NullCancellation();
+            $eventDispatcher   = new EventDispatcher();
 
             $client = new Client(
                 configuration: $configuration,
@@ -68,13 +63,13 @@ final class ConnectionConnectTest extends AsyncTestCase
                 logger: $this->logger,
             );
 
-            await([
-                async($client->connect(...)),
-                async($client->connect(...)),
-                async($client->connect(...)),
-            ]);
+            $client->connect();
 
-            $client->disconnect();
+            await([
+                async($client->disconnect(...)),
+                async($client->disconnect(...)),
+                async($client->disconnect(...)),
+            ]);
 
             self::assertTrue(true);
         });

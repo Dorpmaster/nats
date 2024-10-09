@@ -14,6 +14,14 @@
 
     <rule ref="Generic.Formatting.MultipleStatementAlignment"/>
 
+    <rule ref="SlevomatCodingStandard.Functions.UnusedInheritedVariablePassedToClosure"/>
+    <rule ref="SlevomatCodingStandard.Functions.UselessParameterDefaultValue"/>
+    <rule ref="SlevomatCodingStandard.Namespaces.UnusedUses">
+        <properties>
+            <property name="searchAnnotations" value="true"/>
+        </properties>
+    </rule>
+
     <rule ref="PHPCompatibility"/>
     <config name="testVersion" value="8.1-"/>
 </ruleset>

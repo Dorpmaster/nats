@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Domain\Connection;
 
 use Amp\Cancellation;
-use Amp\Future;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 
 interface ConnectionInterface

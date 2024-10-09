@@ -16,7 +16,6 @@ use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\Metadata\ServerInfo;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
 use Dorpmaster\Nats\Protocol\PongMessage;
-use PHPUnit\Logging\Exception;
 use Psr\Log\LoggerInterface;
 
 final class MessageDispatcher implements MessageDispatcherInterface

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Tests\Unit\Connection;
 
-use Amp\DeferredFuture;
 use Amp\Socket\Socket;
 use Amp\Socket\SocketConnector;
 use Dorpmaster\Nats\Connection\Connection;
@@ -12,7 +11,6 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Tests\AsyncTestCase;
 use Psr\Log\LoggerInterface;
-use Revolt\EventLoop;
 
 final class ConnectionReceiveTest extends AsyncTestCase
 {

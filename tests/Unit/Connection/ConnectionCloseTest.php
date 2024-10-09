@@ -8,7 +8,6 @@ use Amp\Socket\Socket;
 use Amp\Socket\SocketConnector;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
-use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 

@@ -41,7 +41,8 @@
     "require-dev": {
         "phpunit/phpunit": "^11.3",
         "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
-        "phpcompatibility/php-compatibility": "^9.3"
+        "phpcompatibility/php-compatibility": "^9.3",
+        "slevomat/coding-standard": "^8.15"
     },
     "scripts": {
         "phpunit": [
