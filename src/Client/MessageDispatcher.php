@@ -40,8 +40,15 @@ final class MessageDispatcher implements MessageDispatcherInterface
         };
     }
 
-    private function processInfo(InfoMessageInterface $message): ConnectMessageInterface
+    public function getServerInfo(): ServerInfo|null
     {
+        return $this->serverInfo;
+    }
+
+    private function processInfo(NatsProtocolMessageInterface $message): ConnectMessageInterface
+    {
+        assert($message instanceof InfoMessageInterface);
+
         $this->logger?->debug('Got the Info Message', [
             'message' => $message,
         ]);
@@ -59,8 +66,13 @@ final class MessageDispatcher implements MessageDispatcherInterface
         return $responseMessage;
     }
 
-    private function processMsg(MsgMessageInterface|HMsgMessageInterface $message): PubMessageInterface|HMsgMessageInterface|null
+    private function processMsg(NatsProtocolMessageInterface $message): PubMessageInterface|HMsgMessageInterface|null
     {
+        assert(
+            $message instanceof MsgMessageInterface
+            || $message instanceof HMsgMessageInterface
+        );
+
         $this->logger?->debug('Got the Msg Message', [
             'message' => $message,
         ]);

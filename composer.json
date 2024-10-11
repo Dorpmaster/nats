@@ -36,7 +36,9 @@
         "amphp/amp": "^3.0",
         "amphp/byte-stream": "^2.1",
         "amphp/socket": "^2.3",
-        "amphp/log": "^2.0"
+        "amphp/log": "^2.0",
+        "ext-event": "*",
+        "ext-pcntl": "*"
     },
     "require-dev": {
         "phpunit/phpunit": "^11.3",
