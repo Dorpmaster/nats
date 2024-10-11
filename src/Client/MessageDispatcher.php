@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Client;
 
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
+use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Protocol\ConnectMessage;
 use Dorpmaster\Nats\Protocol\Contracts\ConnectMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\InfoMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
@@ -24,6 +26,7 @@ final class MessageDispatcher implements MessageDispatcherInterface
 
     public function __construct(
         private readonly ConnectInfo $connectInfo,
+        private readonly SubscriptionStorageInterface $storage,
         private readonly LoggerInterface|null $logger = null,
     ) {
     }
@@ -66,7 +69,7 @@ final class MessageDispatcher implements MessageDispatcherInterface
         return $responseMessage;
     }
 
-    private function processMsg(NatsProtocolMessageInterface $message): PubMessageInterface|HMsgMessageInterface|null
+    private function processMsg(NatsProtocolMessageInterface $message): PubMessageInterface|HPubMessageInterface|null
     {
         assert(
             $message instanceof MsgMessageInterface
@@ -75,6 +78,35 @@ final class MessageDispatcher implements MessageDispatcherInterface
 
         $this->logger?->debug('Got the Msg Message', [
             'message' => $message,
+        ]);
+
+        $closure = $this->storage->get($message->getSid());
+        if ($closure === null) {
+            $this->logger?->warning('Could not find a subscription handler for the Message', [
+                'message' => $message,
+                'sid' => $message->getSid(),
+            ]);
+
+            return null;
+        }
+
+        $response = $closure($message);
+
+        if ($response === null) {
+            return null;
+        }
+
+        if (
+            $response instanceof PubMessageInterface === true
+            || $response instanceof HPubMessageInterface === true
+        ) {
+            return $response;
+        }
+
+        $this->logger?->error('Got a wrong response from the subscription handler for the Message', [
+            'message' => $message,
+            'sid' => $message->getSid(),
+            'response' => $response,
         ]);
 
         return null;

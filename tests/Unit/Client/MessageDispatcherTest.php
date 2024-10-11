@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Tests\Unit\Client;
 
 use Dorpmaster\Nats\Client\MessageDispatcher;
+use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\ConnectMessageInterface;
 use Dorpmaster\Nats\Protocol\ErrMessage;
 use Dorpmaster\Nats\Protocol\Header\HeaderBag;
@@ -16,6 +17,7 @@ use Dorpmaster\Nats\Protocol\MsgMessage;
 use Dorpmaster\Nats\Protocol\OkMessage;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Protocol\PongMessage;
+use Dorpmaster\Nats\Protocol\PubMessage;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -23,10 +25,11 @@ final class MessageDispatcherTest extends TestCase
 {
     public function testDispatchInfo(): void
     {
+        $storage     = self::createMock(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $logger      = self::createMock(LoggerInterface::class);
 
-        $dispatcher = new MessageDispatcher($connectInfo, $logger);
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
         $info        = [
             'server_id' => 'id',
@@ -47,10 +50,11 @@ final class MessageDispatcherTest extends TestCase
 
     public function testGetServerInfo(): void
     {
+        $storage     = self::createMock(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $logger      = self::createMock(LoggerInterface::class);
 
-        $dispatcher = new MessageDispatcher($connectInfo, $logger);
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
         $info = [
             'server_id' => 'id',
@@ -83,12 +87,43 @@ final class MessageDispatcherTest extends TestCase
         self::assertSame(1, $serverInfo->proto);
     }
 
-    public function testDispatchMsg(): void
+    public function testDispatchMsgWithResponse(): void
     {
+        $storage = self::createMock(SubscriptionStorageInterface::class);
+        $storage->method('get')
+            ->with('sid')
+            ->willReturn(
+                static fn() => new PubMessage('response', 'payload')
+            );
+
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $logger      = self::createMock(LoggerInterface::class);
 
-        $dispatcher = new MessageDispatcher($connectInfo, $logger);
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
+
+        $message = new MsgMessage(
+            'subject',
+            'sid',
+            'payload',
+        );
+
+        $response = $dispatcher->dispatch($message);
+        self::assertInstanceOf(PubMessage::class, $response);
+        self::assertSame('response', $response->getSubject());
+        self::assertSame('payload', $response->getPayload());
+    }
+
+    public function testDispatchMsgNoResponse(): void
+    {
+        $storage = self::createMock(SubscriptionStorageInterface::class);
+        $storage->method('get')
+            ->with('sid')
+            ->willReturn(null);
+
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $logger      = self::createMock(LoggerInterface::class);
+
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
         $message = new MsgMessage(
             'subject',
@@ -98,24 +133,45 @@ final class MessageDispatcherTest extends TestCase
 
         $response = $dispatcher->dispatch($message);
         self::assertNull($response);
+    }
 
-//        $message = new MsgMessage(
-//            'subject',
-//            'sid',
-//            'payload',
-//            'reply'
-//        );
-//
-//        $response = $dispatcher->dispatch($message);
-//        self::assertInstanceOf(MsgMessageInterface::class, $response);
+    public function testDispatchMsgWrongResponse(): void
+    {
+        $storage = self::createMock(SubscriptionStorageInterface::class);
+        $storage->method('get')
+            ->with('sid')
+            ->willReturn(
+                static fn() => new PingMessage()
+            );
+
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $logger      = self::createMock(LoggerInterface::class);
+
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
+
+        $message = new MsgMessage(
+            'subject',
+            'sid',
+            'payload',
+        );
+
+        $response = $dispatcher->dispatch($message);
+        self::assertNull($response);
     }
 
     public function testDispatchHMsg(): void
     {
+        $storage = self::createMock(SubscriptionStorageInterface::class);
+        $storage->method('get')
+            ->with('sid')
+            ->willReturn(
+                static fn() => new PubMessage('response', 'payload')
+            );
+
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $logger      = self::createMock(LoggerInterface::class);
 
-        $dispatcher = new MessageDispatcher($connectInfo, $logger);
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
         $message = new HMsgMessage(
             'subject',
@@ -125,26 +181,19 @@ final class MessageDispatcherTest extends TestCase
         );
 
         $response = $dispatcher->dispatch($message);
-        self::assertNull($response);
-//
-//        $message = new HMsgMessage(
-//            'subject',
-//            'sid',
-//            'payload',
-//            new HeaderBag(),
-//            'reply',
-//        );
-//
-//        $response = $dispatcher->dispatch($message);
-//        self::assertInstanceOf(HMsgMessageInterface::class, $response);
+
+        self::assertInstanceOf(PubMessage::class, $response);
+        self::assertSame('response', $response->getSubject());
+        self::assertSame('payload', $response->getPayload());
     }
 
     public function testDispatchPing(): void
     {
+        $storage     = self::createMock(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $logger      = self::createMock(LoggerInterface::class);
 
-        $dispatcher = new MessageDispatcher($connectInfo, $logger);
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
         $message = new PingMessage();
 
@@ -154,10 +203,11 @@ final class MessageDispatcherTest extends TestCase
 
     public function testDispatchOk(): void
     {
+        $storage     = self::createMock(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $logger      = self::createMock(LoggerInterface::class);
 
-        $dispatcher = new MessageDispatcher($connectInfo, $logger);
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
         $message = new OkMessage();
 
@@ -167,10 +217,11 @@ final class MessageDispatcherTest extends TestCase
 
     public function testDispatchErr(): void
     {
+        $storage     = self::createMock(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $logger      = self::createMock(LoggerInterface::class);
 
-        $dispatcher = new MessageDispatcher($connectInfo, $logger);
+        $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
         $message = new ErrMessage('payload');
 
