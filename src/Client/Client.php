@@ -6,40 +6,50 @@ namespace Dorpmaster\Nats\Client;
 
 use Amp\Cancellation;
 use Amp\CancelledException;
+use Amp\CompositeCancellation;
 use Amp\DeferredFuture;
 use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
+use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
+use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
+use Dorpmaster\Nats\Protocol\SubMessage;
+use Dorpmaster\Nats\Protocol\UnSubMessage;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
-
+use Throwable;
 use function Amp\delay;
 
 final class Client implements ClientInterface
 {
-    private const string CONNECTED         = 'CONNECTED';
-    private const string CONNECTING        = 'CONNECTING';
-    private const string DISCONNECTED      = 'DISCONNECTED';
-    private const string DISCONNECTING     = 'DISCONNECTING';
+    private const string CONNECTED = 'CONNECTED';
+    private const string CONNECTING = 'CONNECTING';
+    private const string DISCONNECTED = 'DISCONNECTED';
+    private const string DISCONNECTING = 'DISCONNECTING';
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
 
     private string $status;
 
-     // A signal indicating that there are messages being processed.
+    // A signal indicating that there are messages being processed.
     private DeferredFuture|null $deferredDispatching = null;
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
-        private readonly Cancellation $cancellation,
-        private readonly ConnectionInterface $connection,
-        private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly MessageDispatcherInterface $messageDispatcher,
-        private readonly LoggerInterface|null $logger = null,
-    ) {
+        private readonly Cancellation                 $cancellation,
+        private readonly ConnectionInterface          $connection,
+        private readonly EventDispatcherInterface     $eventDispatcher,
+        private readonly MessageDispatcherInterface   $messageDispatcher,
+        private readonly SubscriptionStorageInterface $storage,
+        private readonly LoggerInterface|null         $logger = null,
+    )
+    {
         $this->status = self::DISCONNECTED;
     }
 
@@ -138,7 +148,7 @@ final class Client implements ClientInterface
                     ]);
 
                     $response = $this->messageDispatcher->dispatch($message);
-                } catch (\Throwable $exception) {
+                } catch (Throwable $exception) {
                     $this->logger?->error('An exception was thrown during dispatching the message', [
                         'exception' => $exception,
                         'message' => $message,
@@ -166,7 +176,7 @@ final class Client implements ClientInterface
                         $this->connection->send($response);
 
                         $this->logger?->debug('Response message has successfully sent');
-                    } catch (\Throwable $exception) {
+                    } catch (Throwable $exception) {
                         $this->logger?->error('An exception was thrown during sending the response message', [
                             'exception' => $exception,
                             'message' => $message,
@@ -228,7 +238,7 @@ final class Client implements ClientInterface
                     ->await(new TimeoutCancellation(10));
 
                 $this->logger?->debug('Dispatched message processing has finished');
-            } catch (\Throwable $exception) {
+            } catch (Throwable $exception) {
                 $this->logger?->error(
                     'Time is over while waiting for the finish of the dispatched message processing',
                     [
@@ -262,6 +272,114 @@ final class Client implements ClientInterface
         delay(0.1);
     }
 
+    /**
+     * @throws Throwable
+     * @throws ConnectionException
+     */
+    public function subscribe(string $subject, \Closure $closure): string
+    {
+        $sid = uniqid(more_entropy: true);
+        $message = new SubMessage($subject, $sid);
+        $this->storage->add($sid, $closure);
+
+        try {
+            $this->connection->send($message);
+        } catch (Throwable $exception) {
+            $this->logger?->error('An exception was thrown while subscribing', [
+                'exception' => $exception,
+                'sid' => $sid,
+                'subject' => $subject,
+            ]);
+
+            $this->storage->remove($sid);
+
+            throw $exception;
+        }
+
+        return $sid;
+    }
+
+    /**
+     * @throws ConnectionException
+     * @throws Throwable
+     */
+    public function unsubscribe(string $sid): void
+    {
+        $message = new UnSubMessage($sid);
+        $this->storage->remove($sid);
+
+        try {
+            $this->connection->send($message);
+        } catch (Throwable $exception) {
+            $this->logger?->error('An exception was thrown while unsubscribing', [
+                'exception' => $exception,
+                'sid' => $sid,
+            ]);
+
+            $this->storage->remove($sid);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * @throws Throwable
+     * @throws ConnectionException
+     */
+    public function publish(PubMessageInterface|HPubMessageInterface $message): void
+    {
+        try {
+            $this->connection->send($message);
+        } catch (Throwable $exception) {
+            $this->logger?->error('An exception was thrown while publishing the message', [
+                'exception' => $exception,
+                'subject' => $message->getSubject(),
+            ]);
+
+            throw $exception;
+        }
+    }
+
+    public function request(
+        PubMessageInterface|HPubMessageInterface $message,
+        float                                                                             $timeout = 30): MsgMessageInterface|HMsgMessageInterface
+    {
+        $receiver = $message->getReplyTo() ?? 'receiver_' . uniqid(more_entropy: true);
+        $cancellation = new CompositeCancellation(
+            $this->cancellation,
+            new TimeoutCancellation($timeout),
+        );
+
+        try {
+            $deferred = new DeferredFuture();
+
+            $cid = $cancellation->subscribe(static fn(CancelledException $exception) => $deferred->error($exception));
+            $sid = $this->subscribe($receiver, static function (MsgMessageInterface|HMsgMessageInterface $message) use ($deferred): null {
+                $deferred->complete($message);
+
+                return null;
+            });
+
+            $this->publish($message);
+
+            return $deferred->getFuture()->await();
+        } catch (Throwable $exception) {
+            $this->logger?->error('An exception was thrown while performing the request', [
+                'exception' => $exception,
+            ]);
+
+            throw $exception;
+        } finally {
+            if (isset($sid) === true) {
+                $this->unsubscribe($sid);
+            }
+
+            if (isset($cid) === true) {
+                $cancellation->unsubscribe($cid);
+            }
+        }
+    }
+
 
     /**
      * @throws CancelledException
@@ -277,7 +395,7 @@ final class Client implements ClientInterface
             $timeout,
             sprintf('Operation timed out while waiting for the connection status "%s"', $status),
         );
-        $suspension   = EventLoop::getSuspension();
+        $suspension = EventLoop::getSuspension();
 
         $cancellationId = $cancellation->subscribe(
             static fn(CancelledException $exception): never => $suspension->throw($exception)
@@ -289,7 +407,7 @@ final class Client implements ClientInterface
             self::STATUS_EVENT_NAME,
             static function (
                 string $eventName,
-                mixed $payload
+                mixed  $payload
             ) use (
                 $suspension,
                 $status,
