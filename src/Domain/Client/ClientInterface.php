@@ -35,6 +35,6 @@ interface ClientInterface
 
     public function request(
         PubMessageInterface|HPubMessageInterface $message,
-        float                                    $timeout = 30
+        float $timeout = 30
     ): MsgMessageInterface|HMsgMessageInterface;
 }

@@ -8,6 +8,7 @@ use Amp\NullCancellation;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
+use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
@@ -50,6 +51,7 @@ final class ClientDisconnectTest extends AsyncTestCase
                 });
 
             $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
+            $storage           = self::createMock(SubscriptionStorageInterface::class);
             $configuration     = new ClientConfiguration();
             $cancellation      = new NullCancellation();
             $eventDispatcher   = new EventDispatcher();
@@ -60,6 +62,7 @@ final class ClientDisconnectTest extends AsyncTestCase
                 connection: $connection,
                 eventDispatcher: $eventDispatcher,
                 messageDispatcher: $messageDispatcher,
+                storage: $storage,
                 logger: $this->logger,
             );
 

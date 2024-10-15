@@ -25,14 +25,15 @@ use Dorpmaster\Nats\Protocol\UnSubMessage;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Throwable;
+
 use function Amp\delay;
 
 final class Client implements ClientInterface
 {
-    private const string CONNECTED = 'CONNECTED';
-    private const string CONNECTING = 'CONNECTING';
-    private const string DISCONNECTED = 'DISCONNECTED';
-    private const string DISCONNECTING = 'DISCONNECTING';
+    private const string CONNECTED         = 'CONNECTED';
+    private const string CONNECTING        = 'CONNECTING';
+    private const string DISCONNECTED      = 'DISCONNECTED';
+    private const string DISCONNECTING     = 'DISCONNECTING';
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
 
     private string $status;
@@ -42,14 +43,13 @@ final class Client implements ClientInterface
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
-        private readonly Cancellation                 $cancellation,
-        private readonly ConnectionInterface          $connection,
-        private readonly EventDispatcherInterface     $eventDispatcher,
-        private readonly MessageDispatcherInterface   $messageDispatcher,
+        private readonly Cancellation $cancellation,
+        private readonly ConnectionInterface $connection,
+        private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly MessageDispatcherInterface $messageDispatcher,
         private readonly SubscriptionStorageInterface $storage,
-        private readonly LoggerInterface|null         $logger = null,
-    )
-    {
+        private readonly LoggerInterface|null $logger = null,
+    ) {
         $this->status = self::DISCONNECTED;
     }
 
@@ -278,7 +278,7 @@ final class Client implements ClientInterface
      */
     public function subscribe(string $subject, \Closure $closure): string
     {
-        $sid = uniqid(more_entropy: true);
+        $sid     = str_replace('.', '', uniqid(more_entropy: true));
         $message = new SubMessage($subject, $sid);
         $this->storage->add($sid, $closure);
 
@@ -316,8 +316,6 @@ final class Client implements ClientInterface
                 'sid' => $sid,
             ]);
 
-            $this->storage->remove($sid);
-
             throw $exception;
         }
     }
@@ -342,9 +340,9 @@ final class Client implements ClientInterface
 
     public function request(
         PubMessageInterface|HPubMessageInterface $message,
-        float                                                                             $timeout = 30): MsgMessageInterface|HMsgMessageInterface
-    {
-        $receiver = $message->getReplyTo() ?? 'receiver_' . uniqid(more_entropy: true);
+        float $timeout = 30
+    ): MsgMessageInterface|HMsgMessageInterface {
+        $receiver     = $message->getReplyTo() ?? 'receiver_' . uniqid(more_entropy: true);
         $cancellation = new CompositeCancellation(
             $this->cancellation,
             new TimeoutCancellation($timeout),
@@ -395,7 +393,7 @@ final class Client implements ClientInterface
             $timeout,
             sprintf('Operation timed out while waiting for the connection status "%s"', $status),
         );
-        $suspension = EventLoop::getSuspension();
+        $suspension   = EventLoop::getSuspension();
 
         $cancellationId = $cancellation->subscribe(
             static fn(CancelledException $exception): never => $suspension->throw($exception)
@@ -407,7 +405,7 @@ final class Client implements ClientInterface
             self::STATUS_EVENT_NAME,
             static function (
                 string $eventName,
-                mixed  $payload
+                mixed $payload
             ) use (
                 $suspension,
                 $status,

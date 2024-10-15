@@ -8,6 +8,7 @@ use Amp\DeferredCancellation;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
+use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Tests\AsyncTestCase;
@@ -22,6 +23,7 @@ final class ClientTest extends AsyncTestCase
         $this->runAsyncTest(function () {
             $connection           = self::createMock(ConnectionInterface::class);
             $messageDispatcher    = self::createMock(MessageDispatcherInterface::class);
+            $storage              = self::createMock(SubscriptionStorageInterface::class);
             $configuration        = new ClientConfiguration();
             $deferredCancellation = new DeferredCancellation();
             $cancellation         = $deferredCancellation->getCancellation();
@@ -33,6 +35,7 @@ final class ClientTest extends AsyncTestCase
                 connection: $connection,
                 eventDispatcher: $eventDispatcher,
                 messageDispatcher: $messageDispatcher,
+                storage: $storage,
                 logger: $this->logger,
             );
 
