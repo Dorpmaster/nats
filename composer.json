@@ -50,6 +50,9 @@
         "phpunit": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Unit"
         ],
+        "test": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Full"
+        ],
         "phpcs": [
             "Composer\\Config::disableProcessTimeout",
             "php vendor/bin/phpcs src tests -ps"

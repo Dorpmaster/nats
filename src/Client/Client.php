@@ -20,6 +20,9 @@ use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
+use Dorpmaster\Nats\Protocol\HPubMessage;
+use Dorpmaster\Nats\Protocol\NatsMessageType;
+use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Protocol\SubMessage;
 use Dorpmaster\Nats\Protocol\UnSubMessage;
 use Psr\Log\LoggerInterface;
@@ -280,9 +283,18 @@ final class Client implements ClientInterface
     {
         $sid     = str_replace('.', '', uniqid(more_entropy: true));
         $message = new SubMessage($subject, $sid);
+        $this->logger?->debug('Subscribing', [
+            'subject' => $subject,
+            'sid' => $sid,
+        ]);
+
         $this->storage->add($sid, $closure);
+        $this->logger?->debug('Subscription saved to storage');
 
         try {
+            $this->logger?->debug('Sending "SUB" message', [
+                'message' => $message,
+            ]);
             $this->connection->send($message);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception was thrown while subscribing', [
@@ -342,7 +354,21 @@ final class Client implements ClientInterface
         PubMessageInterface|HPubMessageInterface $message,
         float $timeout = 30
     ): MsgMessageInterface|HMsgMessageInterface {
-        $receiver     = $message->getReplyTo() ?? 'receiver_' . uniqid(more_entropy: true);
+        $id             = str_replace('.', '', uniqid(more_entropy: true));
+        $receiver       = $message->getReplyTo();
+        $requestMessage = $message;
+        if ($receiver === null) {
+            $receiver       = 'receiver' . $id;
+            $requestMessage = match ($message->getType()) {
+                NatsMessageType::PUB => new PubMessage($message->getSubject(), $message->getPayload(), $receiver),
+                NatsMessageType::HPUB => new HPubMessage(
+                    $message->getSubject(),
+                    $message->getPayload(),
+                    $message->getHeaders(),
+                    $receiver,
+                ),
+            };
+        }
         $cancellation = new CompositeCancellation(
             $this->cancellation,
             new TimeoutCancellation($timeout),
@@ -358,7 +384,7 @@ final class Client implements ClientInterface
                 return null;
             });
 
-            $this->publish($message);
+            $this->publish($requestMessage);
 
             return $deferred->getFuture()->await();
         } catch (Throwable $exception) {

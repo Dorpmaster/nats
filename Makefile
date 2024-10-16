@@ -16,15 +16,15 @@ help:
 
 .PHONY: build
 build:
-	docker compose build
+	docker build -t nats-client .
 
 .PHONY: up
-up: build
+up:
 	docker compose up -d
 
-.PHONY: watch
-watch: build
-	docker compose watch
+#.PHONY: watch
+#watch: build
+#	docker compose watch
 
 .PHONY: down
 down:
@@ -41,14 +41,41 @@ composer:
 		  --ignore-platform-req=ext-pcntl \
 		  $(RUN_ARGS)
 
-.PHONY: test
-test:
-	docker compose run --rm --interactive \
+.PHONY: phpunit
+phpunit: build
+	docker run --rm --interactive \
 		--volume $(PWD):/app \
 		--volume $(HOME)/.cache/composer}:/tmp \
 		--user $(id -u):$(id -g) \
 		--workdir /app \
-		client composer phpunit
+		nats-client composer phpunit
+
+.PHONY: test
+test:
+	$(eval NETWORK=$(shell docker network ls | grep nats-client-test-network | wc -l))
+	if [ $(NETWORK) -eq 0 ]; then \
+		docker network create nats-client-test-network; \
+	fi
+
+	docker run -d --rm \
+		--name nats-test \
+		--network=name=nats-client-test-network,alias=nats \
+		nats:alpine
+
+	docker run --rm --interactive \
+		--volume $(PWD):/app \
+		--volume $(HOME)/.cache/composer}:/tmp \
+		--user $(id -u):$(id -g) \
+		--network=nats-client-test-network \
+		--workdir /app \
+		nats-client composer test || true
+
+	docker rm -fv nats-test
+
+	$(eval NETWORK=$(shell docker network ls | grep nats-client-test-network | wc -l))
+	if [ $(NETWORK) -eq 1 ]; then \
+		docker network rm nats-client-test-network; \
+	fi
 
 .PHONY: phpcs
 phpcs:
