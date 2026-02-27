@@ -89,7 +89,7 @@ final class ClientReconnectTest extends TestCase
         });
     }
 
-    public function testCancelledExceptionTriggersReconnect(): void
+    public function testCancelledExceptionStopsProcessingWithoutReconnect(): void
     {
         $this->setTimeout(10);
         $this->runAsyncTest(function () {
@@ -101,9 +101,6 @@ final class ClientReconnectTest extends TestCase
             $connection->method('open')
                 ->willReturnCallback(static function () use (&$openCalls): void {
                     $openCalls++;
-                    if ($openCalls >= 3) {
-                        throw new \RuntimeException('reconnect failed');
-                    }
                 });
             $connection->method('close');
             $connection->method('isClosed')->willReturn(false);
@@ -126,7 +123,7 @@ final class ClientReconnectTest extends TestCase
             $client = new Client(
                 configuration: new ClientConfiguration(
                     reconnectEnabled: true,
-                    maxReconnectAttempts: 1,
+                    maxReconnectAttempts: 3,
                     reconnectJitterFraction: 0.0,
                 ),
                 cancellation: new NullCancellation(),
@@ -140,10 +137,10 @@ final class ClientReconnectTest extends TestCase
             // Act
             $client->connect();
             $this->forceTick();
-            $this->forceTick();
+            $client->disconnect();
 
             // Assert
-            self::assertGreaterThanOrEqual(2, $openCalls);
+            self::assertSame(1, $openCalls);
         });
     }
 

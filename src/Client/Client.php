@@ -130,15 +130,9 @@ final class Client implements ClientInterface
                 try {
                     $message = $this->connection->receive($this->cancellation);
                 } catch (CancelledException) {
-                    if (!$this->tryReconnect()) {
-                        $this->logger?->info('Received a termination signal. Stopping to process the messages.');
+                    $this->logger?->info('Received a termination signal. Stopping to process the messages.');
 
-                        return;
-                    }
-
-                    $pendingResubscribe = true;
-
-                    continue;
+                    return;
                 } catch (Throwable $exception) {
                     if (!$this->tryReconnect($exception)) {
                         return;

@@ -22,8 +22,9 @@ Reconnect is triggered when the active connection drops due to:
 
 - socket EOF (`receive()` returns `null` and connection is closed),
 - read error (`receive()` throws),
-- parser fatal error surfaced through `receive()` (malformed/unknown frame),
-- cancellation from receive path (handled as reconnect trigger in v1).
+- parser fatal error surfaced through `receive()` (malformed/unknown frame).
+
+`CancelledException` from receive path is treated as termination signal and stops receive-loop without reconnect.
 
 ## Semantics
 
