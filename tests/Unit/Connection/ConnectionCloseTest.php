@@ -15,14 +15,18 @@ final class ConnectionCloseTest extends TestCase
 {
     public function testClose(): void
     {
-        $socket = self::createMock(Socket::class);
+        $socket = self::createStub(Socket::class);
 
         $connector = self::createMock(SocketConnector::class);
-        $connector->method('connect')
-            ->with('test.nats.local:4222')
-            ->willReturn($socket);
+        $connector->expects(self::once())
+            ->method('connect')
+            ->willReturnCallback(static function (string $uri) use ($socket): Socket {
+                self::assertSame('test.nats.local:4222', $uri);
 
-        $configuration = self::createMock(ConnectionConfigurationInterface::class);
+                return $socket;
+            });
+
+        $configuration = self::createStub(ConnectionConfigurationInterface::class);
         $configuration->method('getHost')
             ->willReturn('test.nats.local');
         $configuration->method('getPort')
@@ -30,7 +34,7 @@ final class ConnectionCloseTest extends TestCase
         $configuration->method('getQueueBufferSize')
             ->willReturn(1000);
 
-        $logger = self::createMock(LoggerInterface::class);
+        $logger = self::createStub(LoggerInterface::class);
 
         $connection = new Connection(
             $connector,

@@ -44,7 +44,8 @@ final class EventDispatcher implements EventDispatcherInterface
             throw new InvalidArgumentException('Event name cannot be empty string');
         }
 
-        $id = $this->nextId++;
+        $id = $this->nextId;
+        $this->nextId = str_increment($this->nextId);
         if (!array_key_exists($eventName, $this->callbacks)) {
             $this->callbacks[$eventName] = [
                 $id => $callback,

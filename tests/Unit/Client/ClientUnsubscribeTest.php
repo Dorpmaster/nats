@@ -11,10 +11,13 @@ use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
-final class ClientUnsubscribeTest extends AsyncTestCase
+final class ClientUnsubscribeTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testSubscribe(): void
     {
         $this->setTimeout(30);
@@ -25,7 +28,7 @@ final class ClientUnsubscribeTest extends AsyncTestCase
             $connection->expects(self::once())
                 ->method('send');
 
-            $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
 
             $storage = self::createMock(SubscriptionStorageInterface::class);
             $storage->expects(self::once())
@@ -62,7 +65,7 @@ final class ClientUnsubscribeTest extends AsyncTestCase
                 ->method('send')
                 ->willThrowException(new \RuntimeException());
 
-            $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
 
             $storage = self::createMock(SubscriptionStorageInterface::class);
             $storage->expects(self::once())

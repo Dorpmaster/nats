@@ -74,7 +74,7 @@ final class Connection implements ConnectionInterface
         $socket = $this->socket;
         $logger = $this->logger;
 
-        $this->logger->debug('Enabling a microtask that processes the incoming stream');
+        $this->logger?->debug('Enabling a microtask that processes the incoming stream');
         EventLoop::queue(static function () use ($socket, $queue, $logger, $cancellation): void {
             try {
                 $parser = new ProtocolParser($queue->push(...));
@@ -108,7 +108,7 @@ final class Connection implements ConnectionInterface
             }
         });
 
-         $this->logger?->debug('Connection has successfully opened');
+        $this->logger?->debug('Connection has successfully opened');
     }
 
     public function close(): void
@@ -132,6 +132,10 @@ final class Connection implements ConnectionInterface
 
     public function send(NatsProtocolMessageInterface $message): void
     {
+        if ($this->isClosed()) {
+            return;
+        }
+
         try {
             $this->socket?->write((string) $message);
         } catch (Throwable $exception) {

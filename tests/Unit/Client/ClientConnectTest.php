@@ -14,21 +14,24 @@ use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Protocol\PongMessage;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
 use function Amp\async;
 use function Amp\delay;
 use function Amp\Future\await;
 
-final class ClientConnectTest extends AsyncTestCase
+final class ClientConnectTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testWaitForConnected(): void
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
             $isClosed = true;
 
-            $connection = self::createMock(ConnectionInterface::class);
+            $connection = self::createStub(ConnectionInterface::class);
             $connection->method('open')
                 ->willReturnCallback(static function () use (&$isClosed): void {
                     delay(0.1);
@@ -52,11 +55,11 @@ final class ClientConnectTest extends AsyncTestCase
                     })->await();
                 });
 
-            $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
             $messageDispatcher->method('dispatch')
                 ->willReturn(new PongMessage());
 
-            $storage = self::createMock(SubscriptionStorageInterface::class);
+            $storage = self::createStub(SubscriptionStorageInterface::class);
 
             $configuration   = new ClientConfiguration();
             $cancellation    = new NullCancellation();

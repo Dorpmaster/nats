@@ -10,19 +10,22 @@ use Amp\Socket\SocketConnector;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
 use Dorpmaster\Nats\Protocol\PingMessage;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 
-final class ConnectionOpenIteratorTest extends AsyncTestCase
+final class ConnectionOpenIteratorTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testSuccessfulReading(): void
     {
         $this->setTimeout(10);
         $this->runAsyncTest(function () {
             $isSocketClosed = true;
 
-            $socket = self::createMock(Socket::class);
+            $socket = self::createStub(Socket::class);
             $socket->method('isClosed')
                 ->willReturnCallback(static function () use (&$isSocketClosed): bool {
                     return $isSocketClosed;
@@ -40,15 +43,16 @@ final class ConnectionOpenIteratorTest extends AsyncTestCase
                 );
 
             $connector = self::createMock(SocketConnector::class);
-            $connector->method('connect')
-                ->with('test.nats.local:4222')
-                ->willReturnCallback(static function () use ($socket, &$isSocketClosed): Socket {
+            $connector->expects(self::once())
+                ->method('connect')
+                ->willReturnCallback(static function (string $uri) use ($socket, &$isSocketClosed): Socket {
+                    self::assertSame('test.nats.local:4222', $uri);
                     $isSocketClosed = false;
 
                     return $socket;
                 });
 
-            $configuration = self::createMock(ConnectionConfigurationInterface::class);
+            $configuration = self::createStub(ConnectionConfigurationInterface::class);
             $configuration->method('getHost')
                 ->willReturn('test.nats.local');
             $configuration->method('getPort')
@@ -56,7 +60,7 @@ final class ConnectionOpenIteratorTest extends AsyncTestCase
             $configuration->method('getQueueBufferSize')
                 ->willReturn(1000);
 
-            $logger = self::createMock(LoggerInterface::class);
+            $logger = self::createStub(LoggerInterface::class);
 
             $connection = new Connection(
                 $connector,
@@ -84,7 +88,7 @@ final class ConnectionOpenIteratorTest extends AsyncTestCase
         $this->runAsyncTest(function () {
             $isSocketClosed = true;
 
-            $socket = self::createMock(Socket::class);
+            $socket = self::createStub(Socket::class);
             $socket->method('isClosed')
                 ->willReturnCallback(static function () use (&$isSocketClosed): bool {
                     return $isSocketClosed;
@@ -99,15 +103,16 @@ final class ConnectionOpenIteratorTest extends AsyncTestCase
                 ->willThrowException(new \Exception('Socket Exception', 10));
 
             $connector = self::createMock(SocketConnector::class);
-            $connector->method('connect')
-                ->with('test.nats.local:4222')
-                ->willReturnCallback(static function () use ($socket, &$isSocketClosed): Socket {
+            $connector->expects(self::once())
+                ->method('connect')
+                ->willReturnCallback(static function (string $uri) use ($socket, &$isSocketClosed): Socket {
+                    self::assertSame('test.nats.local:4222', $uri);
                     $isSocketClosed = false;
 
                     return $socket;
                 });
 
-            $configuration = self::createMock(ConnectionConfigurationInterface::class);
+            $configuration = self::createStub(ConnectionConfigurationInterface::class);
             $configuration->method('getHost')
                 ->willReturn('test.nats.local');
             $configuration->method('getPort')
@@ -115,7 +120,7 @@ final class ConnectionOpenIteratorTest extends AsyncTestCase
             $configuration->method('getQueueBufferSize')
                 ->willReturn(1000);
 
-            $logger = self::createMock(LoggerInterface::class);
+            $logger = self::createStub(LoggerInterface::class);
 
             $connection = new Connection(
                 $connector,

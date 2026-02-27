@@ -1,0 +1,17 @@
+services:
+  nats:
+    image: nats:2-alpine
+    command: ["-m", "8222", "-p", "4222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/varz"]
+      interval: 1s
+      timeout: 1s
+      retries: 15
+
+networks:
+  default:
+    external: true
+    name: nats-client-test-network

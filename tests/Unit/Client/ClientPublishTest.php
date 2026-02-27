@@ -12,10 +12,13 @@ use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\PubMessage;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
-final class ClientPublishTest extends AsyncTestCase
+final class ClientPublishTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testPublish(): void
     {
         $this->setTimeout(30);
@@ -28,8 +31,8 @@ final class ClientPublishTest extends AsyncTestCase
                 ->with($message)
             ;
 
-            $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
-            $storage           = self::createMock(SubscriptionStorageInterface::class);
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
+            $storage           = self::createStub(SubscriptionStorageInterface::class);
             $configuration     = new ClientConfiguration();
             $cancellation      = new NullCancellation();
             $eventDispatcher   = new EventDispatcher();
@@ -60,8 +63,8 @@ final class ClientPublishTest extends AsyncTestCase
                 ->with($message)
                 ->willThrowException(new \RuntimeException());
 
-            $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
-            $storage           = self::createMock(SubscriptionStorageInterface::class);
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
+            $storage           = self::createStub(SubscriptionStorageInterface::class);
 
             $configuration   = new ClientConfiguration();
             $cancellation    = new NullCancellation();

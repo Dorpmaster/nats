@@ -7,10 +7,13 @@ namespace Dorpmaster\Nats\Tests\Unit\Protocol\Parser;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
 use Dorpmaster\Nats\Protocol\PingMessage;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
-final class ParsePingMessageTest extends AsyncTestCase
+final class ParsePingMessageTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testMessage(): void
     {
         $this->setTimeout(10);

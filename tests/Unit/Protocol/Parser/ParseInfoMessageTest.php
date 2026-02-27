@@ -8,10 +8,13 @@ use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\InfoMessage;
 use Dorpmaster\Nats\Protocol\Metadata\ServerInfo;
 use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
-final class ParseInfoMessageTest extends AsyncTestCase
+final class ParseInfoMessageTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testMessage(): void
     {
         $this->setTimeout(10);

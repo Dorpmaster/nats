@@ -19,10 +19,19 @@ use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\PubMessage;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
+use PHPUnit\Framework\TestCase;
 
-final class ClientRequestTest extends AsyncTestCase
+final class ClientRequestTest extends TestCase
 {
+    use AsyncTestTools;
+
+    public static function setUpBeforeClass(): void
+    {
+        NatsServerHarness::waitUntilReady();
+    }
+
     public function testRequest(): void
     {
         $this->setTimeout(30);
@@ -31,7 +40,7 @@ final class ClientRequestTest extends AsyncTestCase
             $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
             $connector = new RetrySocketConnector(new DnsSocketConnector());
-            $config    = new ConnectionConfiguration('nats', 4222);
+            $config    = new ConnectionConfiguration(NatsServerHarness::host(), NatsServerHarness::port());
 
             $connection          = new Connection($connector, $config, $this->logger);
             $clientConfiguration = new ClientConfiguration();

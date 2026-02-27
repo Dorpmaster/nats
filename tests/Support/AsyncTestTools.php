@@ -2,16 +2,15 @@
 
 declare(strict_types=1);
 
-namespace Dorpmaster\Nats\Tests;
+namespace Dorpmaster\Nats\Tests\Support;
 
+use Amp\DeferredFuture;
+use Amp\Future;
 use Amp\Log\ConsoleFormatter;
 use Amp\Log\StreamHandler;
 use Monolog\Logger;
 use Monolog\Processor\PsrLogMessageProcessor;
 use PHPUnit\Framework\AssertionFailedError;
-use Amp\DeferredFuture;
-use Amp\Future;
-use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Revolt\EventLoop\Driver\TracingDriver;
@@ -20,22 +19,18 @@ use Throwable;
 use function Amp\async;
 use function Amp\ByteStream\getStderr;
 
-/**
- * Provides the ability to test asynchronous code.
- */
-abstract class AsyncTestCase extends TestCase
+trait AsyncTestTools
 {
     private DeferredFuture $deferredFuture;
 
     private string $timeoutId;
 
-    private bool $setUpInvoked = false;
-
     protected LoggerInterface $logger;
 
     protected function setUp(): void
     {
-        $this->setUpInvoked   = true;
+        parent::setUp();
+
         $this->deferredFuture = new DeferredFuture();
 
         EventLoop::setErrorHandler(function (Throwable $exception): void {
@@ -43,10 +38,10 @@ abstract class AsyncTestCase extends TestCase
                 return;
             }
 
-            $this->deferredFuture->error(new UnhandledException($exception));
+            $this->deferredFuture->error($exception);
         });
 
-        $this->logger = self::createMock(LoggerInterface::class);
+        $this->logger = self::createStub(LoggerInterface::class);
         if ($_SERVER['TEST_DEBUG_LOGGER'] ?? false) {
             $logHandler = new StreamHandler(getStderr());
             $logHandler->pushProcessor(new PsrLogMessageProcessor());
@@ -57,19 +52,8 @@ abstract class AsyncTestCase extends TestCase
         }
     }
 
-    final protected function runAsyncTest(\Closure $test): void
+    protected function runAsyncTest(\Closure $test): void
     {
-        if (!$this->setUpInvoked) {
-            self::fail(
-                sprintf(
-                    '%s::setUp() overrides %s::setUp() without calling the parent method',
-                    // replace NUL-byte in anonymous class name
-                    str_replace("\0", '@', static::class),
-                    self::class
-                )
-            );
-        }
-
         try {
             Future\await([
                 $this->deferredFuture->getFuture(),
@@ -80,8 +64,6 @@ abstract class AsyncTestCase extends TestCase
                             $result->await();
                         }
 
-                        // Force an extra tick of the event loop to ensure any uncaught exceptions are
-                        // forwarded to the event loop handler before the test ends.
                         $this->forceTick();
                     } finally {
                         if (!$this->deferredFuture->isComplete()) {
@@ -95,16 +77,11 @@ abstract class AsyncTestCase extends TestCase
                 EventLoop::cancel($this->timeoutId);
             }
 
-            \gc_collect_cycles(); // Throw from as many destructors as possible.
+            \gc_collect_cycles();
         }
     }
 
-    /**
-     * Fails the test (and stops the event loop) after the given timeout.
-     *
-     * @param float $seconds Timeout in seconds.
-     */
-    final protected function setTimeout(float $seconds): void
+    protected function setTimeout(float $seconds): void
     {
         if (isset($this->timeoutId)) {
             EventLoop::cancel($this->timeoutId);
@@ -114,7 +91,6 @@ abstract class AsyncTestCase extends TestCase
             EventLoop::setErrorHandler(null);
 
             $additionalInfo = '';
-
             $driver = EventLoop::getDriver();
             if ($driver instanceof TracingDriver) {
                 $additionalInfo .= "\r\n\r\n" . $driver->dump();
@@ -127,10 +103,10 @@ abstract class AsyncTestCase extends TestCase
             }
 
             try {
-                $this->fail(sprintf(
+                self::fail(sprintf(
                     'Expected test to complete before %0.3fs time limit%s',
                     $seconds,
-                    $additionalInfo
+                    $additionalInfo,
                 ));
             } catch (AssertionFailedError $e) {
                 $this->deferredFuture->error($e);
@@ -140,11 +116,7 @@ abstract class AsyncTestCase extends TestCase
         EventLoop::unreference($this->timeoutId);
     }
 
-    /**
-     * Forces an extra tick of the event loop to ensure any callbacks are
-     * processed to the event loop handler before start assertions.
-     */
-    final protected function forceTick(): void
+    protected function forceTick(): void
     {
         $deferred = new DeferredFuture();
         EventLoop::defer(static fn () => $deferred->complete());

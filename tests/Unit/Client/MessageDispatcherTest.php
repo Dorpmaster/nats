@@ -25,9 +25,9 @@ final class MessageDispatcherTest extends TestCase
 {
     public function testDispatchInfo(): void
     {
-        $storage     = self::createMock(SubscriptionStorageInterface::class);
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -50,9 +50,9 @@ final class MessageDispatcherTest extends TestCase
 
     public function testGetServerInfo(): void
     {
-        $storage     = self::createMock(SubscriptionStorageInterface::class);
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -90,14 +90,16 @@ final class MessageDispatcherTest extends TestCase
     public function testDispatchMsgWithResponse(): void
     {
         $storage = self::createMock(SubscriptionStorageInterface::class);
-        $storage->method('get')
-            ->with('sid')
-            ->willReturn(
-                static fn() => new PubMessage('response', 'payload')
-            );
+        $storage->expects(self::once())
+            ->method('get')
+            ->willReturnCallback(static function (string $sid): callable {
+                self::assertSame('sid', $sid);
+
+                return static fn() => new PubMessage('response', 'payload');
+            });
 
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -116,12 +118,16 @@ final class MessageDispatcherTest extends TestCase
     public function testDispatchMsgNoResponse(): void
     {
         $storage = self::createMock(SubscriptionStorageInterface::class);
-        $storage->method('get')
-            ->with('sid')
-            ->willReturn(null);
+        $storage->expects(self::once())
+            ->method('get')
+            ->willReturnCallback(static function (string $sid): null {
+                self::assertSame('sid', $sid);
+
+                return null;
+            });
 
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -138,14 +144,16 @@ final class MessageDispatcherTest extends TestCase
     public function testDispatchMsgWrongResponse(): void
     {
         $storage = self::createMock(SubscriptionStorageInterface::class);
-        $storage->method('get')
-            ->with('sid')
-            ->willReturn(
-                static fn() => new PingMessage()
-            );
+        $storage->expects(self::once())
+            ->method('get')
+            ->willReturnCallback(static function (string $sid): callable {
+                self::assertSame('sid', $sid);
+
+                return static fn() => new PingMessage();
+            });
 
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -162,14 +170,16 @@ final class MessageDispatcherTest extends TestCase
     public function testDispatchHMsg(): void
     {
         $storage = self::createMock(SubscriptionStorageInterface::class);
-        $storage->method('get')
-            ->with('sid')
-            ->willReturn(
-                static fn() => new PubMessage('response', 'payload')
-            );
+        $storage->expects(self::once())
+            ->method('get')
+            ->willReturnCallback(static function (string $sid): callable {
+                self::assertSame('sid', $sid);
+
+                return static fn() => new PubMessage('response', 'payload');
+            });
 
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -189,9 +199,9 @@ final class MessageDispatcherTest extends TestCase
 
     public function testDispatchPing(): void
     {
-        $storage     = self::createMock(SubscriptionStorageInterface::class);
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -203,9 +213,9 @@ final class MessageDispatcherTest extends TestCase
 
     public function testDispatchOk(): void
     {
-        $storage     = self::createMock(SubscriptionStorageInterface::class);
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 
@@ -217,9 +227,9 @@ final class MessageDispatcherTest extends TestCase
 
     public function testDispatchErr(): void
     {
-        $storage     = self::createMock(SubscriptionStorageInterface::class);
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-        $logger      = self::createMock(LoggerInterface::class);
+        $logger      = self::createStub(LoggerInterface::class);
 
         $dispatcher = new MessageDispatcher($connectInfo, $storage, $logger);
 

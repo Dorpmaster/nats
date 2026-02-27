@@ -7,6 +7,9 @@ Makefile: ;              # skip prerequisite
 
 # use the rest as arguments for "run"
 RUN_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+NATS_COMPOSE_FILE := docker/compose.nats.test.yml
+NATS_PROJECT := nats-it
+NATS_NETWORK := nats-client-test-network
 # ...and turn them into do-nothing targets
 $(eval $(RUN_ARGS):;@:)
 
@@ -30,89 +33,76 @@ up:
 down:
 	docker compose down --timeout=0 --volumes --remove-orphans
 
+.PHONY: nats-up
+nats-up:
+	if ! docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_NETWORK); \
+	fi
+	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) up -d --wait --remove-orphans
+
+.PHONY: nats-down
+nats-down:
+	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans
+	if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
+		docker network rm $(NATS_NETWORK); \
+	fi
+
 .PHONY: composer
-composer:
-	docker run --rm --interactive --tty \
+composer: build
+	docker run --rm --interactive \
 		--volume $(PWD):/app \
-		--volume $(HOME)/.cache/composer}:/tmp \
-		--user $(id -u):$(id -g) \
-		composer \
-		  --ignore-platform-req=ext-event \
-		  --ignore-platform-req=ext-pcntl \
-		  $(RUN_ARGS)
+		--workdir /app \
+		nats-client composer $(RUN_ARGS)
 
 .PHONY: phpunit
 phpunit: build
 	docker run --rm --interactive \
-		--volume $(PWD):/app \
-		--volume $(HOME)/.cache/composer}:/tmp \
-		--user $(id -u):$(id -g) \
-		--workdir /app \
 		nats-client composer phpunit
 
-.PHONY: test
-test:
-	$(eval NETWORK=$(shell docker network ls | grep nats-client-test-network | wc -l))
-	if [ $(NETWORK) -eq 0 ]; then \
-		docker network create nats-client-test-network; \
+.PHONY: integration
+integration: build
+	set -e
+	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK); fi' EXIT
+	if ! docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_NETWORK); \
 	fi
-
-	docker run -d --rm \
-		--name nats-test \
-		--network=name=nats-client-test-network,alias=nats \
-		nats:alpine
-
+	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) up -d --wait --remove-orphans
 	docker run --rm --interactive \
-		--volume $(PWD):/app \
-		--volume $(HOME)/.cache/composer}:/tmp \
-		--user $(id -u):$(id -g) \
-		--network=nats-client-test-network \
-		--workdir /app \
-		nats-client composer test || true
+		--network=$(NATS_NETWORK) \
+		--env NATS_HOST=nats \
+		--env NATS_PORT=4222 \
+		nats-client composer integration
 
-	docker rm -fv nats-test
-
-	$(eval NETWORK=$(shell docker network ls | grep nats-client-test-network | wc -l))
-	if [ $(NETWORK) -eq 1 ]; then \
-		docker network rm nats-client-test-network; \
+.PHONY: test
+test: build
+	set -e
+	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK); fi' EXIT
+	if ! docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_NETWORK); \
 	fi
+	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) up -d --wait --remove-orphans
+	docker run --rm --interactive \
+		--network=$(NATS_NETWORK) \
+		--env NATS_HOST=nats \
+		--env NATS_PORT=4222 \
+		nats-client composer test
 
 .PHONY: phpcs
-phpcs:
-	docker run --rm --interactive --tty \
-    	--volume $(PWD):/app \
-    	--user $(id -u):$(id -g) \
-    	composer composer \
-		  --ignore-platform-req=ext-event \
-		  --ignore-platform-req=ext-pcntl \
-		  phpcs
+phpcs: build
+	docker run --rm --interactive \
+    	nats-client composer phpcs
 
 .PHONY: phpcs-file
-phpcs-file:
-	docker run --rm --interactive --tty \
-    	--volume $(PWD):/app \
-    	--user $(id -u):$(id -g) \
-    	composer composer \
-		  --ignore-platform-req=ext-event \
-		  --ignore-platform-req=ext-pcntl \
-		  phpcs:file $(RUN_ARGS)
+phpcs-file: build
+	docker run --rm --interactive \
+    	nats-client composer phpcs:file $(RUN_ARGS)
 
 .PHONY: phpcs-fix
-phpcs-fix:
-	docker run --rm --interactive --tty \
-    	--volume $(PWD):/app \
-    	--user $(id -u):$(id -g) \
-    	composer composer \
-		  --ignore-platform-req=ext-event \
-		  --ignore-platform-req=ext-pcntl \
-		  phpcs:fix
+phpcs-fix: build
+	docker run --rm --interactive \
+    	nats-client composer phpcs:fix
 
 .PHONY: phpcs-fix-file
-phpcs-fix-file:
-	docker run --rm --interactive --tty \
-    	--volume $(PWD):/app \
-    	--user $(id -u):$(id -g) \
-    	composer composer \
-    	  --ignore-platform-req=ext-event \
-    	  --ignore-platform-req=ext-pcntl \
-    	  phpcs:fix:file $(RUN_ARGS)
+phpcs-fix-file: build
+	docker run --rm --interactive \
+    	nats-client composer phpcs:fix:file $(RUN_ARGS)

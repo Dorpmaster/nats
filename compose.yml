@@ -12,7 +12,7 @@ services:
         - path: composer.lock
           action: rebuild
         - path: .
-          target: /var/www
+          target: /app
           action: sync+restart
           ignore:
             - vendor/

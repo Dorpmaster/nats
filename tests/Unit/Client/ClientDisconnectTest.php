@@ -13,27 +13,30 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\PingMessage;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
 use function Amp\async;
 use function Amp\delay;
 use function Amp\Future\await;
 
-final class ClientDisconnectTest extends AsyncTestCase
+final class ClientDisconnectTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testWaitForDisconnected(): void
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
             $isClosed = true;
 
-            $connection = self::createMock(ConnectionInterface::class);
+            $connection = self::createStub(ConnectionInterface::class);
             $connection->method('open')
                 ->willReturnCallback(static function () use (&$isClosed): void {
                     $isClosed = false;
                 });
 
-            $connection = self::createMock(ConnectionInterface::class);
+            $connection = self::createStub(ConnectionInterface::class);
             $connection->method('close')
                 ->willReturnCallback(static function () use (&$isClosed): void {
                     delay(0.1);
@@ -50,8 +53,8 @@ final class ClientDisconnectTest extends AsyncTestCase
                     return async(static fn(): NatsProtocolMessageInterface => new PingMessage())->await();
                 });
 
-            $messageDispatcher = self::createMock(MessageDispatcherInterface::class);
-            $storage           = self::createMock(SubscriptionStorageInterface::class);
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
+            $storage           = self::createStub(SubscriptionStorageInterface::class);
             $configuration     = new ClientConfiguration();
             $cancellation      = new NullCancellation();
             $eventDispatcher   = new EventDispatcher();

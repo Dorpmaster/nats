@@ -11,19 +11,22 @@ use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
 use function Amp\async;
 
-final class ClientTest extends AsyncTestCase
+final class ClientTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testWaitForTermination(): void
     {
         $this->setTimeout(3);
         $this->runAsyncTest(function () {
-            $connection           = self::createMock(ConnectionInterface::class);
-            $messageDispatcher    = self::createMock(MessageDispatcherInterface::class);
-            $storage              = self::createMock(SubscriptionStorageInterface::class);
+            $connection           = self::createStub(ConnectionInterface::class);
+            $messageDispatcher    = self::createStub(MessageDispatcherInterface::class);
+            $storage              = self::createStub(SubscriptionStorageInterface::class);
             $configuration        = new ClientConfiguration();
             $deferredCancellation = new DeferredCancellation();
             $cancellation         = $deferredCancellation->getCancellation();

@@ -7,10 +7,13 @@ namespace Dorpmaster\Nats\Tests\Unit\Protocol\Parser;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\OkMessage;
 use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
-final class ParseOkMessageTest extends AsyncTestCase
+final class ParseOkMessageTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testMessage(): void
     {
         $this->setTimeout(10);

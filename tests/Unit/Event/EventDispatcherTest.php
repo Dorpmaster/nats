@@ -6,12 +6,15 @@ namespace Dorpmaster\Nats\Tests\Unit\Event;
 
 use Amp\DeferredFuture;
 use Dorpmaster\Nats\Event\EventDispatcher;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 use InvalidArgumentException;
 use Revolt\EventLoop;
 
-final class EventDispatcherTest extends AsyncTestCase
+final class EventDispatcherTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testDispatchException(): void
     {
         $dispatcher = new EventDispatcher();

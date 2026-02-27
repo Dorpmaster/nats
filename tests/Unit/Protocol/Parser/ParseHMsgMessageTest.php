@@ -7,10 +7,13 @@ namespace Dorpmaster\Nats\Tests\Unit\Protocol\Parser;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\HMsgMessage;
 use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
-use Dorpmaster\Nats\Tests\AsyncTestCase;
+use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use PHPUnit\Framework\TestCase;
 
-final class ParseHMsgMessageTest extends AsyncTestCase
+final class ParseHMsgMessageTest extends TestCase
 {
+    use AsyncTestTools;
+
     public function testMessageNoReply(): void
     {
         $this->setTimeout(10);

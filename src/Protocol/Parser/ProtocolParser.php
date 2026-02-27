@@ -82,9 +82,21 @@ final readonly class ProtocolParser implements ProtocolParserInterface
             default => throw new \RuntimeException('Malformed MSG message'),
         };
 
-        $payload = yield (int) $size;
+        if (!self::isUnsignedInteger($size)) {
+            throw new \RuntimeException('MSG payload size must be numeric');
+        }
 
-        yield 2; // Remove trailing CRLF
+        $payloadSize = (int) $size;
+        $payload     = yield $payloadSize;
+
+        $delimiter = yield 2;
+        if ($delimiter !== NatsProtocolMessageInterface::DELIMITER) {
+            throw new \RuntimeException('Malformed MSG message payload delimiter');
+        }
+
+        if (strlen($payload) !== $payloadSize) {
+            throw new \RuntimeException('Malformed MSG message payload length');
+        }
 
         return new MsgMessage($subject, $sid, $payload, $replyTo ?? null);
     }
@@ -101,12 +113,29 @@ final readonly class ProtocolParser implements ProtocolParserInterface
             default => throw new \RuntimeException('Malformed HMSG message'),
         };
 
-        $payloadWithHeaders = trim(yield (int) $totalSize);
-        $headersPayload     = substr($payloadWithHeaders, 0, (int) $headersSize);
-        $payload            = substr($payloadWithHeaders, (int) $headersSize);
+        if (!self::isUnsignedInteger($headersSize) || !self::isUnsignedInteger($totalSize)) {
+            throw new \RuntimeException('HMSG sizes must be numeric');
+        }
+
+        $headersLength = (int) $headersSize;
+        $totalLength   = (int) $totalSize;
+        if ($headersLength > $totalLength) {
+            throw new \RuntimeException('Malformed HMSG message sizes');
+        }
+
+        $payloadWithHeaders = yield $totalLength;
+        if (strlen($payloadWithHeaders) !== $totalLength) {
+            throw new \RuntimeException('Malformed HMSG message payload length');
+        }
+
+        $headersPayload = substr($payloadWithHeaders, 0, $headersLength);
+        $payload        = substr($payloadWithHeaders, $headersLength);
         $headers            = self::parseHeaders($headersPayload);
 
-        yield 2; // Remove trailing CRLF
+        $delimiter = yield 2;
+        if ($delimiter !== NatsProtocolMessageInterface::DELIMITER) {
+            throw new \RuntimeException('Malformed HMSG message payload delimiter');
+        }
 
         return new HMsgMessage($subject, $sid, $payload, $headers, $replyTo ?? null);
     }
@@ -146,5 +175,10 @@ final readonly class ProtocolParser implements ProtocolParserInterface
         }
 
         return $headers;
+    }
+
+    private static function isUnsignedInteger(string $value): bool
+    {
+        return preg_match('/^\d+$/', $value) === 1;
     }
 }

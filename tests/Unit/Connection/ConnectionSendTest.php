@@ -18,6 +18,7 @@ final class ConnectionSendTest extends TestCase
 {
     public function testOpen(): void
     {
+        // Arrange
         $message = new PongMessage();
 
         $socket = self::createMock(Socket::class);
@@ -26,11 +27,15 @@ final class ConnectionSendTest extends TestCase
             ->with((string) $message);
 
         $connector = self::createMock(SocketConnector::class);
-        $connector->method('connect')
-            ->with('test.nats.local:4222')
-            ->willReturn($socket);
+        $connector->expects(self::once())
+            ->method('connect')
+            ->willReturnCallback(static function (string $uri) use ($socket): Socket {
+                self::assertSame('test.nats.local:4222', $uri);
 
-        $configuration = self::createMock(ConnectionConfigurationInterface::class);
+                return $socket;
+            });
+
+        $configuration = self::createStub(ConnectionConfigurationInterface::class);
         $configuration->method('getHost')
             ->willReturn('test.nats.local');
         $configuration->method('getPort')
@@ -38,7 +43,7 @@ final class ConnectionSendTest extends TestCase
         $configuration->method('getQueueBufferSize')
             ->willReturn(1000);
 
-        $logger = self::createMock(LoggerInterface::class);
+        $logger = self::createStub(LoggerInterface::class);
 
         $connection = new Connection(
             $connector,
@@ -46,15 +51,19 @@ final class ConnectionSendTest extends TestCase
             $logger,
         );
 
+        // Act
         self::assertTrue($connection->isClosed());
         $connection->open();
         self::assertFalse($connection->isClosed());
-
         $connection->send($message);
+
+        // Assert
+        self::assertFalse($connection->isClosed());
     }
 
     public function testSocketException(): void
     {
+        // Arrange
         $message = new PingMessage();
 
         $socket = self::createMock(Socket::class);
@@ -64,11 +73,15 @@ final class ConnectionSendTest extends TestCase
             ->willThrowException(new \Exception('Socket exception', 10));
 
         $connector = self::createMock(SocketConnector::class);
-        $connector->method('connect')
-            ->with('test.nats.local:4222')
-            ->willReturn($socket);
+        $connector->expects(self::once())
+            ->method('connect')
+            ->willReturnCallback(static function (string $uri) use ($socket): Socket {
+                self::assertSame('test.nats.local:4222', $uri);
 
-        $configuration = self::createMock(ConnectionConfigurationInterface::class);
+                return $socket;
+            });
+
+        $configuration = self::createStub(ConnectionConfigurationInterface::class);
         $configuration->method('getHost')
             ->willReturn('test.nats.local');
         $configuration->method('getPort')
@@ -76,7 +89,7 @@ final class ConnectionSendTest extends TestCase
         $configuration->method('getQueueBufferSize')
             ->willReturn(1000);
 
-        $logger = self::createMock(LoggerInterface::class);
+        $logger = self::createStub(LoggerInterface::class);
 
         $connection = new Connection(
             $connector,
@@ -84,21 +97,21 @@ final class ConnectionSendTest extends TestCase
             $logger,
         );
 
+        // Act
         self::assertTrue($connection->isClosed());
-
         $connection->open();
         self::assertFalse($connection->isClosed());
 
+        // Assert
         self::expectException(ConnectionException::class);
         self::expectExceptionMessage('Socket exception');
         self::expectExceptionCode(10);
-        $connection->open();
-
         $connection->send($message);
     }
 
     public function testClosed(): void
     {
+        // Arrange
         $message = new PingMessage();
 
         $socket = self::createMock(Socket::class);
@@ -106,12 +119,12 @@ final class ConnectionSendTest extends TestCase
             ->method('write');
 
         $connector = self::createMock(SocketConnector::class);
-        $connector->method('connect')
-            ->with('test.nats.local:4222')
+        $connector->expects(self::never())
+            ->method('connect')
             ->willReturn($socket);
 
-        $configuration = self::createMock(ConnectionConfigurationInterface::class);
-        $logger        = self::createMock(LoggerInterface::class);
+        $configuration = self::createStub(ConnectionConfigurationInterface::class);
+        $logger        = self::createStub(LoggerInterface::class);
 
         $connection = new Connection(
             $connector,
@@ -119,8 +132,100 @@ final class ConnectionSendTest extends TestCase
             $logger,
         );
 
+        // Act
         self::assertTrue($connection->isClosed());
-
         $connection->send($message);
+
+        // Assert
+        self::assertTrue($connection->isClosed());
+    }
+
+    public function testSendAfterCloseDoesNothing(): void
+    {
+        // Arrange
+        $message = new PingMessage();
+
+        $socket = self::createMock(Socket::class);
+        $socket->expects(self::once())
+            ->method('write')
+            ->with((string) $message);
+
+        $connector = self::createMock(SocketConnector::class);
+        $connector->expects(self::once())
+            ->method('connect')
+            ->willReturnCallback(static function (string $uri) use ($socket): Socket {
+                self::assertSame('test.nats.local:4222', $uri);
+
+                return $socket;
+            });
+
+        $configuration = self::createStub(ConnectionConfigurationInterface::class);
+        $configuration->method('getHost')
+            ->willReturn('test.nats.local');
+        $configuration->method('getPort')
+            ->willReturn(4222);
+        $configuration->method('getQueueBufferSize')
+            ->willReturn(1000);
+
+        $logger = self::createStub(LoggerInterface::class);
+
+        $connection = new Connection(
+            $connector,
+            $configuration,
+            $logger,
+        );
+
+        // Act
+        $connection->open();
+        $connection->send($message);
+        $connection->close();
+        $connection->send($message);
+
+        // Assert
+        self::assertTrue($connection->isClosed());
+    }
+
+    public function testSendDoesNothingWhenSocketExistsButMarkedClosed(): void
+    {
+        // Arrange
+        $message = new PingMessage();
+
+        $socket = self::createMock(Socket::class);
+        $socket->method('isClosed')
+            ->willReturn(true);
+        $socket->expects(self::never())
+            ->method('write');
+
+        $connector = self::createMock(SocketConnector::class);
+        $connector->expects(self::once())
+            ->method('connect')
+            ->willReturnCallback(static function (string $uri) use ($socket): Socket {
+                self::assertSame('test.nats.local:4222', $uri);
+
+                return $socket;
+            });
+
+        $configuration = self::createStub(ConnectionConfigurationInterface::class);
+        $configuration->method('getHost')
+            ->willReturn('test.nats.local');
+        $configuration->method('getPort')
+            ->willReturn(4222);
+        $configuration->method('getQueueBufferSize')
+            ->willReturn(1000);
+
+        $logger = self::createStub(LoggerInterface::class);
+
+        $connection = new Connection(
+            $connector,
+            $configuration,
+            $logger,
+        );
+
+        // Act
+        $connection->open();
+        $connection->send($message);
+
+        // Assert
+        self::assertTrue($connection->isClosed());
     }
 }
