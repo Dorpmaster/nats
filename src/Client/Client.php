@@ -35,6 +35,7 @@ final class Client implements ClientInterface
 {
     private const string CONNECTED         = 'CONNECTED';
     private const string CONNECTING        = 'CONNECTING';
+    private const string RECONNECTING      = 'RECONNECTING';
     private const string DISCONNECTED      = 'DISCONNECTED';
     private const string DISCONNECTING     = 'DISCONNECTING';
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
@@ -43,6 +44,8 @@ final class Client implements ClientInterface
 
     // A signal indicating that there are messages being processed.
     private DeferredFuture|null $deferredDispatching = null;
+    /** @var array<string, string> */
+    private array $subscriptionsBySid = [];
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
@@ -52,6 +55,7 @@ final class Client implements ClientInterface
         private readonly MessageDispatcherInterface $messageDispatcher,
         private readonly SubscriptionStorageInterface $storage,
         private readonly LoggerInterface|null $logger = null,
+        private readonly \Closure|null $delayHandler = null,
     ) {
         $this->status = self::DISCONNECTED;
     }
@@ -63,7 +67,7 @@ final class Client implements ClientInterface
         try {
             $status = match ($this->status) {
                 self::CONNECTED => self::CONNECTED,
-                self::CONNECTING => $this->waitForStatus(
+                self::CONNECTING, self::RECONNECTING => $this->waitForStatus(
                     self::CONNECTED,
                     $this->configuration->getWaitForStatusTimeout(),
                 ),
@@ -84,7 +88,7 @@ final class Client implements ClientInterface
 
         $this->logger?->debug(sprintf('Status of the connection: %s', $status));
 
-        if (!in_array($status, [self::CONNECTED, self::DISCONNECTED])) {
+        if (!in_array($status, [self::CONNECTED, self::DISCONNECTED], true)) {
             $this->logger?->error('Wrong connection status. Connection process terminated', [
                 'status' => $this->status,
             ]);
@@ -121,15 +125,31 @@ final class Client implements ClientInterface
 
         $this->logger?->debug('Starting a microtask that processes the messages');
         EventLoop::queue(function () {
+            $pendingResubscribe = false;
+
             $this->logger?->debug('Starting to processes the messages');
-            while ($this->status === self::CONNECTED) {
+            while (in_array($this->status, [self::CONNECTED, self::RECONNECTING], true)) {
                 $this->logger?->debug('Getting a message');
                 try {
                     $message = $this->connection->receive($this->cancellation);
                 } catch (CancelledException) {
-                    $this->logger?->info('Received a termination signal. Stopping to process the messages.');
+                    if (!$this->tryReconnect()) {
+                        $this->logger?->info('Received a termination signal. Stopping to process the messages.');
 
-                    return;
+                        return;
+                    }
+
+                    $pendingResubscribe = true;
+
+                    continue;
+                } catch (Throwable $exception) {
+                    if (!$this->tryReconnect($exception)) {
+                        return;
+                    }
+
+                    $pendingResubscribe = true;
+
+                    continue;
                 }
 
                 /**
@@ -141,6 +161,14 @@ final class Client implements ClientInterface
                 if ($message === null) {
                     $this->logger?->debug('No messages received');
                     $this->deferredDispatching->complete();
+
+                    if ($this->connection->isClosed()) {
+                        if (!$this->tryReconnect()) {
+                            return;
+                        }
+
+                        $pendingResubscribe = true;
+                    }
 
                     continue;
                 }
@@ -187,6 +215,11 @@ final class Client implements ClientInterface
                     }
                 }
 
+                if ($pendingResubscribe && $message->getType() === NatsMessageType::INFO) {
+                    $this->restoreSubscriptions();
+                    $pendingResubscribe = false;
+                }
+
                 if ($this->deferredDispatching->isComplete() === false) {
                     $this->deferredDispatching->complete();
                 }
@@ -202,6 +235,7 @@ final class Client implements ClientInterface
             $status = match ($this->status) {
                 self::CONNECTED => self::CONNECTED,
                 self::CONNECTING => $this->waitForStatus(self::CONNECTED),
+                self::RECONNECTING => self::RECONNECTING,
                 self::DISCONNECTING => $this->waitForStatus(self::DISCONNECTED),
                 self::DISCONNECTED => self::DISCONNECTED,
                 default => null,
@@ -216,7 +250,7 @@ final class Client implements ClientInterface
 
         $this->logger?->debug(sprintf('Status of the connection: %s', $status));
 
-        if (!in_array($status, [self::CONNECTED, self::DISCONNECTED])) {
+        if (!in_array($status, [self::CONNECTED, self::RECONNECTING, self::DISCONNECTED], true)) {
             $this->logger?->error('Wrong connection status. Disconnection process terminated', [
                 'status' => $this->status,
             ]);
@@ -289,6 +323,7 @@ final class Client implements ClientInterface
         ]);
 
         $this->storage->add($sid, $closure);
+        $this->subscriptionsBySid[$sid] = $subject;
         $this->logger?->debug('Subscription saved to storage');
 
         try {
@@ -304,6 +339,7 @@ final class Client implements ClientInterface
             ]);
 
             $this->storage->remove($sid);
+            unset($this->subscriptionsBySid[$sid]);
 
             throw $exception;
         }
@@ -319,6 +355,7 @@ final class Client implements ClientInterface
     {
         $message = new UnSubMessage($sid);
         $this->storage->remove($sid);
+        unset($this->subscriptionsBySid[$sid]);
 
         try {
             $this->connection->send($message);
@@ -465,5 +502,104 @@ final class Client implements ClientInterface
         $this->eventDispatcher->unsubscribe($subId);
 
         return $status;
+    }
+
+    private function tryReconnect(Throwable|null $reason = null): bool
+    {
+        if (!$this->configuration->isReconnectEnabled()) {
+            $this->logger?->warning('Reconnect is disabled. Stopping message processing.', [
+                'exception' => $reason,
+            ]);
+
+            $this->status = self::DISCONNECTED;
+            $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+            return false;
+        }
+
+        if (!in_array($this->status, [self::CONNECTED, self::RECONNECTING], true)) {
+            return false;
+        }
+
+        $this->status = self::RECONNECTING;
+        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+        $maxAttempts = $this->configuration->getMaxReconnectAttempts();
+        $attempt     = 0;
+
+        while (true) {
+            if ($maxAttempts !== null && $attempt >= $maxAttempts) {
+                $this->logger?->error('Reconnect attempts are exhausted', [
+                    'attempts' => $attempt,
+                    'exception' => $reason,
+                ]);
+
+                $this->status = self::DISCONNECTED;
+                $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+                return false;
+            }
+
+            $attempt++;
+            try {
+                $this->connection->close();
+                $this->connection->open($this->cancellation);
+                if ($this->connection->isClosed()) {
+                    throw new ConnectionException('Reconnect open() returned a closed connection');
+                }
+                $this->status = self::CONNECTED;
+                $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+                return true;
+            } catch (Throwable $exception) {
+                $this->logger?->warning('Reconnect attempt failed', [
+                    'attempt' => $attempt,
+                    'exception' => $exception,
+                ]);
+            }
+
+            $this->waitReconnectBackoff($attempt);
+            if ($this->status !== self::RECONNECTING) {
+                return false;
+            }
+        }
+    }
+
+    private function waitReconnectBackoff(int $attempt): void
+    {
+        $delayMs = $this->calculateReconnectDelayMs($attempt);
+
+        try {
+            if ($this->delayHandler !== null) {
+                ($this->delayHandler)($delayMs / 1000);
+            } else {
+                delay($delayMs / 1000);
+            }
+        } catch (CancelledException) {
+            $this->status = self::DISCONNECTED;
+            $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+        }
+    }
+
+    private function calculateReconnectDelayMs(int $attempt): float
+    {
+        $initial = (float) $this->configuration->getReconnectBackoffInitialMs();
+        $max     = (float) $this->configuration->getReconnectBackoffMaxMs();
+        $factor  = max(1.0, $this->configuration->getReconnectBackoffMultiplier());
+
+        $baseDelay = min($max, $initial * ($factor ** max(0, $attempt - 1)));
+        $jitterMax = max(0.0, $this->configuration->getReconnectJitterFraction()) * $baseDelay;
+        if ($jitterMax <= 0.0) {
+            return $baseDelay;
+        }
+
+        return $baseDelay + (lcg_value() * $jitterMax);
+    }
+
+    private function restoreSubscriptions(): void
+    {
+        foreach ($this->subscriptionsBySid as $sid => $subject) {
+            $this->connection->send(new SubMessage($subject, $sid));
+        }
     }
 }

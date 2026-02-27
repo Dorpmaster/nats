@@ -27,4 +27,10 @@ final class SubscriptionStorage implements SubscriptionStorageInterface
             unset($this->storage[$sid]);
         }
     }
+
+    /** @return array<string, Closure> */
+    public function all(): array
+    {
+        return $this->storage;
+    }
 }
