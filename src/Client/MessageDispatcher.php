@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Client;
 
+use Dorpmaster\Nats\Domain\Client\SlowConsumerException;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Protocol\ConnectMessage;
@@ -23,11 +24,15 @@ use Psr\Log\LoggerInterface;
 final class MessageDispatcher implements MessageDispatcherInterface
 {
     private ServerInfo|null $serverInfo = null;
+    /** @var array<string, int> */
+    private array $pendingMessagesBySid = [];
 
     public function __construct(
         private readonly ConnectInfo $connectInfo,
         private readonly SubscriptionStorageInterface $storage,
         private readonly LoggerInterface|null $logger = null,
+        private readonly int $maxPendingMessagesPerSubscription = 1000,
+        private readonly SlowConsumerPolicy $slowConsumerPolicy = SlowConsumerPolicy::ERROR,
     ) {
     }
 
@@ -90,7 +95,16 @@ final class MessageDispatcher implements MessageDispatcherInterface
             return null;
         }
 
-        $response = $closure($message);
+        $sid = $message->getSid();
+        if (!$this->acquirePendingSlot($sid)) {
+            return null;
+        }
+
+        try {
+            $response = $closure($message);
+        } finally {
+            $this->releasePendingSlot($sid);
+        }
 
         if ($response === null) {
             return null;
@@ -110,6 +124,46 @@ final class MessageDispatcher implements MessageDispatcherInterface
         ]);
 
         return null;
+    }
+
+    private function acquirePendingSlot(string $sid): bool
+    {
+        $pending = ($this->pendingMessagesBySid[$sid] ?? 0) + 1;
+        if ($pending > $this->maxPendingMessagesPerSubscription) {
+            $policy = $this->slowConsumerPolicy;
+            if ($policy === SlowConsumerPolicy::DROP_NEW) {
+                $this->logger?->warning('Dropping message due to slow consumer (DROP_NEW policy)', [
+                    'sid' => $sid,
+                    'pending' => $pending,
+                    'max_pending' => $this->maxPendingMessagesPerSubscription,
+                ]);
+
+                return false;
+            }
+
+            throw new SlowConsumerException(sprintf(
+                'Slow consumer detected for sid "%s": pending=%d max=%d',
+                $sid,
+                $pending,
+                $this->maxPendingMessagesPerSubscription,
+            ));
+        }
+
+        $this->pendingMessagesBySid[$sid] = $pending;
+
+        return true;
+    }
+
+    private function releasePendingSlot(string $sid): void
+    {
+        $pending = ($this->pendingMessagesBySid[$sid] ?? 1) - 1;
+        if ($pending <= 0) {
+            unset($this->pendingMessagesBySid[$sid]);
+
+            return;
+        }
+
+        $this->pendingMessagesBySid[$sid] = $pending;
     }
 
     private function processErr(NatsProtocolMessageInterface $message): null

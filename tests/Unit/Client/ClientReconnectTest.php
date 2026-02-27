@@ -14,6 +14,7 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use Dorpmaster\Nats\Tests\Support\RecordingDelayStrategy;
 use PHPUnit\Framework\TestCase;
 
 final class ClientReconnectTest extends TestCase
@@ -211,7 +212,7 @@ final class ClientReconnectTest extends TestCase
             // Arrange
             $openCalls = 0;
             $reads     = 0;
-            $delays    = [];
+            $delayStrategy = new RecordingDelayStrategy();
 
             $connection = self::createStub(ConnectionInterface::class);
             $connection->method('open')
@@ -255,9 +256,7 @@ final class ClientReconnectTest extends TestCase
                 messageDispatcher: $messageDispatcher,
                 storage: $storage,
                 logger: $this->logger,
-                delayHandler: static function (float $seconds) use (&$delays): void {
-                    $delays[] = $seconds;
-                },
+                delayStrategy: $delayStrategy,
             );
 
             // Act
@@ -267,9 +266,7 @@ final class ClientReconnectTest extends TestCase
 
             // Assert
             self::assertSame(3, $openCalls);
-            self::assertCount(2, $delays);
-            self::assertEqualsWithDelta(0.01, $delays[0], 0.0001);
-            self::assertEqualsWithDelta(0.02, $delays[1], 0.0001);
+            self::assertSame([10, 20], $delayStrategy->delays());
         });
     }
 }

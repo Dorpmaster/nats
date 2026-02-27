@@ -30,6 +30,9 @@ Reconnect is triggered when the active connection drops due to:
 - Reconnect retries are bounded by `maxReconnectAttempts` unless `null` (infinite).
 - Backoff is exponential: `initial * multiplier^(attempt-1)`, capped by `max`.
 - Jitter adds `0..(base * jitterFraction)` to each delay.
+- Reconnect delays are delegated to `DelayStrategyInterface`:
+  - default: `EventLoopDelayStrategy`
+  - tests: `ImmediateDelayStrategy` / `RecordingDelayStrategy`
 - Reconnect does not create additional receive loops: one loop remains active.
 - Existing subscriptions are restored automatically after reconnect handshake (after `INFO`).
 

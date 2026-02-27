@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Tests\Unit\Client;
 
 use Dorpmaster\Nats\Client\MessageDispatcher;
+use Dorpmaster\Nats\Client\SlowConsumerPolicy;
+use Dorpmaster\Nats\Domain\Client\SlowConsumerException;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\ConnectMessageInterface;
 use Dorpmaster\Nats\Protocol\ErrMessage;
@@ -237,5 +239,75 @@ final class MessageDispatcherTest extends TestCase
 
         $response = $dispatcher->dispatch($message);
         self::assertNull($response);
+    }
+
+    public function testPendingMessagesExceedTriggersErrorPolicy(): void
+    {
+        // Arrange
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
+
+        $dispatcher = null;
+        $storage->method('get')
+            ->willReturn(static function () use (&$dispatcher) {
+                assert($dispatcher instanceof MessageDispatcher);
+
+                // Re-entrant dispatch keeps pending counter acquired and triggers slow consumer.
+                $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload'));
+
+                return null;
+            });
+
+        $dispatcher = new MessageDispatcher(
+            $connectInfo,
+            $storage,
+            null,
+            maxPendingMessagesPerSubscription: 1,
+            slowConsumerPolicy: SlowConsumerPolicy::ERROR,
+        );
+
+        // Assert
+        self::expectException(SlowConsumerException::class);
+        self::expectExceptionMessage('Slow consumer detected for sid "sid"');
+
+        // Act
+        $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload'));
+    }
+
+    public function testDropNewPolicyDropsOverflowAndKeepsDispatcherWorking(): void
+    {
+        // Arrange
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
+        $calls       = 0;
+
+        $dispatcher = null;
+        $storage->method('get')
+            ->willReturn(static function () use (&$dispatcher, &$calls) {
+                $calls++;
+                if ($calls === 1) {
+                    assert($dispatcher instanceof MessageDispatcher);
+                    $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload-overflow'));
+                }
+
+                return null;
+            });
+
+        $dispatcher = new MessageDispatcher(
+            $connectInfo,
+            $storage,
+            null,
+            maxPendingMessagesPerSubscription: 1,
+            slowConsumerPolicy: SlowConsumerPolicy::DROP_NEW,
+        );
+
+        // Act
+        $response1 = $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload-1'));
+        $response2 = $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload-2'));
+
+        // Assert
+        self::assertNull($response1);
+        self::assertNull($response2);
+        self::assertSame(2, $calls);
     }
 }

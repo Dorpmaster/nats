@@ -1,8 +1,14 @@
 # NATS AMPHP Client
 
-## Reliability / Reconnect
+## Installation
 
-Reconnect v1 is available via `ClientConfiguration`:
+```bash
+composer require dorpmaster/nats
+```
+
+## Reconnect
+
+Reconnect v1 is configurable via `ClientConfiguration`:
 
 ```php
 $config = new ClientConfiguration(
@@ -15,13 +21,31 @@ $config = new ClientConfiguration(
 );
 ```
 
-See detailed semantics:
+Details:
 
 - [docs/reconnect.md](docs/reconnect.md)
 - [docs/state-machine.md](docs/state-machine.md)
 
-## Run Tests
+## Drain
+
+Use graceful shutdown:
+
+```php
+$client->drain();
+```
+
+Details:
+
+- [docs/drain.md](docs/drain.md)
+
+## Backpressure
+
+Slow-consumer handling is documented here:
+
+- [docs/backpressure.md](docs/backpressure.md)
+
+## Testing
 
 - Unit: `make phpunit`
-- Integration (real nats-server): `make integration`
+- Integration (real `nats-server`): `make integration`
 - Full suite: `make test`

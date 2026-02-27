@@ -1,6 +1,6 @@
 {
     "name": "dorpmaster/nats",
-    "type": "project",
+    "type": "library",
     "description": "Asynchronous client for NATS server.",
     "keywords": [
         "amp",
