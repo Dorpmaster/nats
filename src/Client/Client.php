@@ -13,6 +13,7 @@ use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
+use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
@@ -48,6 +49,7 @@ final class Client implements ClientInterface
     private DeferredFuture|null $deferredDispatching = null;
     /** @var array<string, string> */
     private array $subscriptionsBySid = [];
+    private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
@@ -58,8 +60,10 @@ final class Client implements ClientInterface
         private readonly SubscriptionStorageInterface $storage,
         private readonly LoggerInterface|null $logger = null,
         private readonly DelayStrategyInterface|null $delayStrategy = null,
+        SubscriptionIdHelperInterface|null $subscriptionIdHelper = null,
     ) {
         $this->status = self::NEW;
+        $this->subscriptionIdHelper = $subscriptionIdHelper ?? new SubscriptionIdHelper();
     }
 
     public function connect(): void
@@ -310,7 +314,7 @@ final class Client implements ClientInterface
      */
     public function subscribe(string $subject, \Closure $closure): string
     {
-        $sid     = str_replace('.', '', uniqid(more_entropy: true));
+        $sid     = $this->subscriptionIdHelper->generateId();
         $message = new SubMessage($subject, $sid);
         $this->logger?->debug('Subscribing', [
             'subject' => $subject,
@@ -394,7 +398,7 @@ final class Client implements ClientInterface
             throw new ConnectionException(sprintf('Could not request while client state is %s', $this->status));
         }
 
-        $id             = str_replace('.', '', uniqid(more_entropy: true));
+        $id             = $this->subscriptionIdHelper->generateId();
         $receiver       = $message->getReplyTo();
         $requestMessage = $message;
         if ($receiver === null) {
