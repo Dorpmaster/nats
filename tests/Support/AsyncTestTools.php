@@ -91,7 +91,7 @@ trait AsyncTestTools
             EventLoop::setErrorHandler(null);
 
             $additionalInfo = '';
-            $driver = EventLoop::getDriver();
+            $driver         = EventLoop::getDriver();
             if ($driver instanceof TracingDriver) {
                 $additionalInfo .= "\r\n\r\n" . $driver->dump();
             } else {

@@ -130,7 +130,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
 
         $headersPayload = substr($payloadWithHeaders, 0, $headersLength);
         $payload        = substr($payloadWithHeaders, $headersLength);
-        $headers            = self::parseHeaders($headersPayload);
+        $headers        = self::parseHeaders($headersPayload);
 
         $delimiter = yield 2;
         if ($delimiter !== NatsProtocolMessageInterface::DELIMITER) {

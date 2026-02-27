@@ -69,16 +69,16 @@ final class ClientStateMachineTest extends TestCase
         $this->setTimeout(5);
         $this->runAsyncTest(function () {
             // Arrange
-            $events = [];
+            $events     = [];
             $dispatcher = new EventDispatcher();
             $dispatcher->subscribe('connectionStatusChanged', static function (string $event, mixed $payload) use (&$events): void {
                 $events[] = $payload;
             });
 
-            $openCalls = 0;
+            $openCalls    = 0;
             $receiveCalls = 0;
-            $closed = false;
-            $connection = self::createStub(ConnectionInterface::class);
+            $closed       = false;
+            $connection   = self::createStub(ConnectionInterface::class);
             $connection->method('open')
                 ->willReturnCallback(static function () use (&$openCalls, &$closed): void {
                     $openCalls++;
@@ -160,7 +160,7 @@ final class ClientStateMachineTest extends TestCase
         $this->setTimeout(5);
         $this->runAsyncTest(function () {
             // Arrange
-            $events = [];
+            $events     = [];
             $dispatcher = new EventDispatcher();
             $dispatcher->subscribe('connectionStatusChanged', static function (string $event, mixed $payload) use (&$events): void {
                 $events[] = $payload;
@@ -173,7 +173,7 @@ final class ClientStateMachineTest extends TestCase
             $connection->method('receive')->willReturn(null);
             $connection->method('send');
 
-            $client = $this->createClientWithConnection($connection, $dispatcher);
+            $client    = $this->createClientWithConnection($connection, $dispatcher);
             $setStatus = \Closure::bind(
                 static function (Client $target): void {
                     $target->status = 'CONNECTED';

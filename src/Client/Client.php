@@ -67,8 +67,8 @@ final class Client implements ClientInterface
         ReconnectDelayHelperInterface|null $reconnectDelayHelper = null,
         ReconnectBackoffServiceInterface|null $reconnectBackoffService = null,
     ) {
-        $this->status = self::NEW;
-        $this->subscriptionIdHelper = $subscriptionIdHelper ?? new SubscriptionIdHelper();
+        $this->status                  = self::NEW;
+        $this->subscriptionIdHelper    = $subscriptionIdHelper ?? new SubscriptionIdHelper();
         $this->reconnectBackoffService = $reconnectBackoffService
             ?? new ReconnectBackoffService(
                 $this->delayStrategy ?? new EventLoopDelayStrategy(),
@@ -625,7 +625,7 @@ final class Client implements ClientInterface
             ));
         }
 
-        $previous    = $this->status;
+        $previous     = $this->status;
         $this->status = $targetState;
         $this->logger?->debug('Client state transition', [
             'from' => $previous,

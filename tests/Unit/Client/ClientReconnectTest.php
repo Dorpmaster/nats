@@ -208,8 +208,8 @@ final class ClientReconnectTest extends TestCase
         $this->setTimeout(10);
         $this->runAsyncTest(function () {
             // Arrange
-            $openCalls = 0;
-            $reads     = 0;
+            $openCalls     = 0;
+            $reads         = 0;
             $delayStrategy = new RecordingDelayStrategy();
 
             $connection = self::createStub(ConnectionInterface::class);
@@ -273,8 +273,8 @@ final class ClientReconnectTest extends TestCase
         $this->setTimeout(10);
         $this->runAsyncTest(function () {
             // Arrange
-            $openCalls = 0;
-            $reads     = 0;
+            $openCalls     = 0;
+            $reads         = 0;
             $delayStrategy = new RecordingDelayStrategy();
 
             $connection = self::createStub(ConnectionInterface::class);

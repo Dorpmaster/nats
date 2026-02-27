@@ -42,7 +42,7 @@ final class ClientIntegrationTest extends TestCase
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
             // Arrange
-            $client = $this->createClient();
+            $client  = $this->createClient();
             $subject = sprintf('it.lifecycle.%s', bin2hex(random_bytes(6)));
 
             try {
@@ -51,7 +51,7 @@ final class ClientIntegrationTest extends TestCase
                 $client->disconnect();
                 $client->disconnect();
                 $client->connect();
-                $sid = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
+                $sid      = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
                     return new PubMessage((string) $message->getReplyTo(), 'ok');
                 });
                 $response = $client->request(new PubMessage($subject, 'ping'), 1);
@@ -111,7 +111,7 @@ final class ClientIntegrationTest extends TestCase
             try {
                 // Act
                 $client->connect();
-                $sid = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
+                $sid      = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
                     return new PubMessage((string) $message->getReplyTo(), 'pong');
                 });
                 $response = $client->request(new PubMessage($subject, 'ping'), 1);

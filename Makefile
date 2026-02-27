@@ -128,9 +128,13 @@ phpcs-file: build
 .PHONY: phpcs-fix
 phpcs-fix: build
 	docker run --rm --interactive \
+		--volume $(PWD):/app \
+		--workdir /app \
     	nats-client composer phpcs:fix
 
 .PHONY: phpcs-fix-file
 phpcs-fix-file: build
 	docker run --rm --interactive \
+		--volume $(PWD):/app \
+		--workdir /app \
     	nats-client composer phpcs:fix:file $(RUN_ARGS)
