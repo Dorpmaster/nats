@@ -13,6 +13,7 @@ use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
+use Dorpmaster\Nats\Domain\Client\ReconnectBackoffServiceInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectDelayHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
@@ -51,7 +52,7 @@ final class Client implements ClientInterface
     /** @var array<string, string> */
     private array $subscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
-    private readonly ReconnectDelayHelperInterface $reconnectDelayHelper;
+    private readonly ReconnectBackoffServiceInterface $reconnectBackoffService;
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
@@ -64,10 +65,15 @@ final class Client implements ClientInterface
         private readonly DelayStrategyInterface|null $delayStrategy = null,
         SubscriptionIdHelperInterface|null $subscriptionIdHelper = null,
         ReconnectDelayHelperInterface|null $reconnectDelayHelper = null,
+        ReconnectBackoffServiceInterface|null $reconnectBackoffService = null,
     ) {
         $this->status = self::NEW;
         $this->subscriptionIdHelper = $subscriptionIdHelper ?? new SubscriptionIdHelper();
-        $this->reconnectDelayHelper = $reconnectDelayHelper ?? new ReconnectDelayHelper();
+        $this->reconnectBackoffService = $reconnectBackoffService
+            ?? new ReconnectBackoffService(
+                $this->delayStrategy ?? new EventLoopDelayStrategy(),
+                $reconnectDelayHelper ?? new ReconnectDelayHelper(),
+            );
     }
 
     public function connect(): void
@@ -574,20 +580,8 @@ final class Client implements ClientInterface
 
     private function waitReconnectBackoff(int $attempt): void
     {
-        $delayMs = $this->reconnectDelayHelper->calculateDelayMs(
-            $attempt,
-            $this->configuration->getReconnectBackoffInitialMs(),
-            $this->configuration->getReconnectBackoffMaxMs(),
-            $this->configuration->getReconnectBackoffMultiplier(),
-            $this->configuration->getReconnectJitterFraction(),
-        );
-
         try {
-            if ($this->delayStrategy !== null) {
-                $this->delayStrategy->delay($delayMs);
-            } else {
-                (new EventLoopDelayStrategy())->delay($delayMs);
-            }
+            $this->reconnectBackoffService->wait($attempt, $this->configuration);
         } catch (CancelledException) {
             $this->transitionTo(self::CLOSED, 'reconnect delay cancelled');
         }

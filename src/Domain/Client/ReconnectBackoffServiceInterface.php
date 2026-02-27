@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Domain\Client;
 
-interface DelayStrategyInterface
+interface ReconnectBackoffServiceInterface
 {
     /**
      * @throws \Amp\CancelledException
      */
-    public function delay(int $milliseconds): void;
+    public function wait(int $attempt, ClientConfigurationInterface $configuration): void;
 }
