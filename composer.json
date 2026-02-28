@@ -1,0 +1,95 @@
+{
+    "name": "dorpmaster/nats",
+    "type": "library",
+    "description": "Production-grade asynchronous NATS client for PHP 8.5+ powered by AMPHP.",
+    "keywords": [
+        "nats",
+        "async",
+        "amphp",
+        "messaging",
+        "cluster",
+        "tls"
+    ],
+    "homepage": "https://github.com/Dorpmaster/nats",
+    "support": {
+        "issues": "https://github.com/Dorpmaster/nats/issues",
+        "source": "https://github.com/Dorpmaster/nats"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Dorpmaster\\Nats\\": "src/"
+        },
+        "exclude-from-classmap": [
+            "/tests/"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Dorpmaster\\Nats\\Tests\\": "tests/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Roman A. Shvetsov",
+            "email": "tcpu6000@gmail.com"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require": {
+        "php": "^8.5",
+        "amphp/amp": "^3.0",
+        "amphp/byte-stream": "^2.1",
+        "amphp/socket": "^2.3",
+        "amphp/log": "^2.0",
+        "ext-event": "*",
+        "ext-pcntl": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "phpcompatibility/php-compatibility": "^9.3",
+        "slevomat/coding-standard": "^8.15"
+    },
+    "scripts": {
+        "phpunit": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Unit"
+        ],
+        "integration": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Integration"
+        ],
+        "integration:tls": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/ClientTlsIntegrationTest.php"
+        ],
+        "integration:cluster": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/ClientClusterFailoverIntegrationTest.php"
+        ],
+        "integration:cluster:tls": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/ClientClusterTlsFailoverIntegrationTest.php"
+        ],
+        "test": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Full"
+        ],
+        "phpcs": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcs src tests -ps"
+        ],
+        "phpcs:file": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcs -ps"
+        ],
+        "phpcs:fix": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcbf src tests -ps"
+        ],
+        "phpcs:fix:file": [
+            "Composer\\Config::disableProcessTimeout",
+            "php vendor/bin/phpcbf -ps"
+        ]
+    },
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    }
+}

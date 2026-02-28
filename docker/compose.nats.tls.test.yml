@@ -1,0 +1,20 @@
+services:
+  nats:
+    image: nats:2-alpine
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    ports:
+      - "4223:4223"
+      - "8223:8223"
+    volumes:
+      - ../tests/Support/tls:/etc/nats/certs:ro
+      - ./nats-server.tls.conf:/etc/nats/nats-server.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8223/varz"]
+      interval: 1s
+      timeout: 1s
+      retries: 15
+
+networks:
+  default:
+    external: true
+    name: nats-client-tls-test-network

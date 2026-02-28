@@ -1,0 +1,54 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Dorpmaster\Nats\Tests\Unit\Connection;
+
+use Amp\Socket\Socket;
+use Amp\Socket\SocketConnector;
+use Dorpmaster\Nats\Connection\Connection;
+use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
+use Dorpmaster\Nats\Domain\Connection\TlsConfiguration;
+use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+
+final class ConnectionCloseTest extends TestCase
+{
+    public function testClose(): void
+    {
+        $socket = self::createStub(Socket::class);
+
+        $connector = self::createMock(SocketConnector::class);
+        $connector->expects(self::once())
+            ->method('connect')
+            ->willReturnCallback(static function (string $uri) use ($socket): Socket {
+                self::assertSame('tcp://test.nats.local:4222', $uri);
+
+                return $socket;
+            });
+
+        $configuration = self::createStub(ConnectionConfigurationInterface::class);
+        $configuration->method('getHost')
+            ->willReturn('test.nats.local');
+        $configuration->method('getPort')
+            ->willReturn(4222);
+        $configuration->method('getQueueBufferSize')
+            ->willReturn(1000);
+        $configuration->method('getTlsConfiguration')
+            ->willReturn(TlsConfiguration::disabled());
+
+        $logger = self::createStub(LoggerInterface::class);
+
+        $connection = new Connection(
+            $connector,
+            $configuration,
+            $logger,
+        );
+
+        self::assertTrue($connection->isClosed());
+        $connection->open();
+        self::assertFalse($connection->isClosed());
+        $connection->close();
+        self::assertTrue($connection->isClosed());
+    }
+}
