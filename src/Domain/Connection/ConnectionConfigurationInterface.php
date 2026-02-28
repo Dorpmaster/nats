@@ -11,4 +11,6 @@ interface ConnectionConfigurationInterface
     public function getPort(): int;
 
     public function getQueueBufferSize(): int;
+
+    public function getTlsConfiguration(): TlsConfiguration;
 }

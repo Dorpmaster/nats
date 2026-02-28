@@ -9,6 +9,7 @@ use Amp\Socket\Socket;
 use Amp\Socket\SocketConnector;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
+use Dorpmaster\Nats\Domain\Connection\TlsConfiguration;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
 use PHPUnit\Framework\TestCase;
@@ -221,7 +222,7 @@ final class ConnectionReceiveTest extends TestCase
         $connector->expects(self::once())
             ->method('connect')
             ->willReturnCallback(static function (string $uri) use ($socket, &$isSocketClosed): Socket {
-                self::assertSame('test.nats.local:4222', $uri);
+                self::assertSame('tcp://test.nats.local:4222', $uri);
                 $isSocketClosed = false;
 
                 return $socket;
@@ -234,6 +235,8 @@ final class ConnectionReceiveTest extends TestCase
             ->willReturn(4222);
         $configuration->method('getQueueBufferSize')
             ->willReturn(1000);
+        $configuration->method('getTlsConfiguration')
+            ->willReturn(TlsConfiguration::disabled());
 
         $logger = self::createStub(LoggerInterface::class);
 

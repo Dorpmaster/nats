@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Tests\Unit\Connection;
 
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
+use Dorpmaster\Nats\Domain\Connection\TlsConfiguration;
 use PHPUnit\Framework\TestCase;
 
 final class ConnectionConfigurationTest extends TestCase
@@ -19,5 +20,6 @@ final class ConnectionConfigurationTest extends TestCase
         self::assertSame('some.server.test', $configuration->getHost());
         self::assertSame(4222, $configuration->getPort());
         self::assertSame(1000, $configuration->getQueueBufferSize());
+        self::assertEquals(TlsConfiguration::disabled(), $configuration->getTlsConfiguration());
     }
 }

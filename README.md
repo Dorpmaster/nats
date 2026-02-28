@@ -70,6 +70,27 @@ $clientConfig = new ClientConfiguration(
 
 Runtime model: `Client` delegates outbound queueing/sending to `WriteBufferService` (queue + writer-loop + drain).
 
+## TLS
+
+```php
+$tls = new TlsConfiguration(
+    enabled: true,
+    verifyPeer: true,
+    caFile: __DIR__ . '/certs/ca.pem',
+    serverName: 'localhost',
+);
+
+$connectionConfig = new ConnectionConfiguration(
+    host: 'localhost',
+    port: 4223,
+    tls: $tls,
+);
+```
+
+Details:
+
+- [docs/tls.md](docs/tls.md)
+
 ## Metrics Hooks
 
 ```php
@@ -101,4 +122,5 @@ Details:
 
 - Unit: `make phpunit`
 - Integration (real `nats-server`): `make integration`
+- Integration TLS: `make integration-tls`
 - Full suite: `make test`

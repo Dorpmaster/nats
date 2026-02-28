@@ -8,6 +8,7 @@ use Amp\Socket\Socket;
 use Amp\Socket\SocketConnector;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
+use Dorpmaster\Nats\Domain\Connection\TlsConfiguration;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -21,7 +22,7 @@ final class ConnectionCloseTest extends TestCase
         $connector->expects(self::once())
             ->method('connect')
             ->willReturnCallback(static function (string $uri) use ($socket): Socket {
-                self::assertSame('test.nats.local:4222', $uri);
+                self::assertSame('tcp://test.nats.local:4222', $uri);
 
                 return $socket;
             });
@@ -33,6 +34,8 @@ final class ConnectionCloseTest extends TestCase
             ->willReturn(4222);
         $configuration->method('getQueueBufferSize')
             ->willReturn(1000);
+        $configuration->method('getTlsConfiguration')
+            ->willReturn(TlsConfiguration::disabled());
 
         $logger = self::createStub(LoggerInterface::class);
 

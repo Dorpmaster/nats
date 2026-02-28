@@ -10,8 +10,12 @@ RUN_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 NATS_COMPOSE_FILE := docker/compose.nats.test.yml
 NATS_PROJECT := nats-it
 NATS_NETWORK := nats-client-test-network
+NATS_TLS_COMPOSE_FILE := docker/compose.nats.tls.test.yml
+NATS_TLS_PROJECT := nats-it-tls
+NATS_TLS_NETWORK := nats-client-tls-test-network
 DOCKER_SOCKET_HOST := $(shell if [ -S /var/run/docker.sock ]; then echo /var/run/docker.sock; elif [ -S $$HOME/.docker/run/docker.sock ]; then echo $$HOME/.docker/run/docker.sock; fi)
 NATS_CONTAINER := $(NATS_PROJECT)-nats-1
+NATS_TLS_CONTAINER := $(NATS_TLS_PROJECT)-nats-1
 # ...and turn them into do-nothing targets
 $(eval $(RUN_ARGS):;@:)
 
@@ -46,7 +50,21 @@ nats-up:
 nats-down:
 	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans
 	if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
-		docker network rm $(NATS_NETWORK); \
+		docker network rm $(NATS_NETWORK) || true; \
+	fi
+
+.PHONY: nats-tls-up
+nats-tls-up:
+	if ! docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_TLS_NETWORK); \
+	fi
+	docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) up -d --wait --remove-orphans
+
+.PHONY: nats-tls-down
+nats-tls-down:
+	docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans
+	if docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network rm $(NATS_TLS_NETWORK) || true; \
 	fi
 
 .PHONY: nats-restart
@@ -81,7 +99,7 @@ phpunit: build
 integration: build
 	set -e
 	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK); fi' EXIT
+	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK) || true; fi' EXIT
 	if ! docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_NETWORK); \
 	fi
@@ -100,7 +118,7 @@ integration: build
 test: build
 	set -e
 	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK); fi' EXIT
+	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK) || true; fi' EXIT
 	if ! docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_NETWORK); \
 	fi
@@ -114,6 +132,26 @@ test: build
 		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
 		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
 		nats-client composer test
+
+.PHONY: integration-tls
+integration-tls: build
+	set -e
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
+	trap 'docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_TLS_NETWORK) || true; fi' EXIT
+	if ! docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_TLS_NETWORK); \
+	fi
+	docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) up -d --wait --remove-orphans
+	docker run --rm --interactive \
+		--user root \
+		--network=$(NATS_TLS_NETWORK) \
+		--env NATS_HOST=nats \
+		--env NATS_PORT=4223 \
+		--env NATS_TLS=1 \
+		--env NATS_CONTAINER=$(NATS_TLS_CONTAINER) \
+		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
+		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
+		nats-client composer integration:tls
 
 .PHONY: phpcs
 phpcs: build
