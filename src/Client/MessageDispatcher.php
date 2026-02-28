@@ -26,6 +26,8 @@ final class MessageDispatcher implements MessageDispatcherInterface
     private ServerInfo|null $serverInfo = null;
     /** @var array<string, int> */
     private array $pendingMessagesBySid = [];
+    /** @var array<string, int> */
+    private array $pendingBytesBySid = [];
 
     public function __construct(
         private readonly ConnectInfo $connectInfo,
@@ -33,6 +35,7 @@ final class MessageDispatcher implements MessageDispatcherInterface
         private readonly LoggerInterface|null $logger = null,
         private readonly int $maxPendingMessagesPerSubscription = 1000,
         private readonly SlowConsumerPolicy $slowConsumerPolicy = SlowConsumerPolicy::ERROR,
+        private readonly int|null $maxPendingBytesPerSubscription = 2_000_000,
     ) {
     }
 
@@ -95,15 +98,16 @@ final class MessageDispatcher implements MessageDispatcherInterface
             return null;
         }
 
-        $sid = $message->getSid();
-        if (!$this->acquirePendingSlot($sid)) {
+        $sid          = $message->getSid();
+        $pendingBytes = $this->extractMessageSize($message);
+        if (!$this->acquirePendingSlot($sid, $pendingBytes)) {
             return null;
         }
 
         try {
             $response = $closure($message);
         } finally {
-            $this->releasePendingSlot($sid);
+            $this->releasePendingSlot($sid, $pendingBytes);
         }
 
         if ($response === null) {
@@ -126,44 +130,68 @@ final class MessageDispatcher implements MessageDispatcherInterface
         return null;
     }
 
-    private function acquirePendingSlot(string $sid): bool
+    private function acquirePendingSlot(string $sid, int $pendingBytes): bool
     {
-        $pending = ($this->pendingMessagesBySid[$sid] ?? 0) + 1;
-        if ($pending > $this->maxPendingMessagesPerSubscription) {
+        $pendingMessages    = ($this->pendingMessagesBySid[$sid] ?? 0) + 1;
+        $pendingBytesSum    = ($this->pendingBytesBySid[$sid] ?? 0) + $pendingBytes;
+        $isMessagesOverflow = $pendingMessages > $this->maxPendingMessagesPerSubscription;
+        $isBytesOverflow    = $this->maxPendingBytesPerSubscription !== null
+            && $pendingBytesSum > $this->maxPendingBytesPerSubscription;
+        if ($isMessagesOverflow || $isBytesOverflow) {
             $policy = $this->slowConsumerPolicy;
             if ($policy === SlowConsumerPolicy::DROP_NEW) {
                 $this->logger?->warning('Dropping message due to slow consumer (DROP_NEW policy)', [
                     'sid' => $sid,
-                    'pending' => $pending,
+                    'pending' => $pendingMessages,
                     'max_pending' => $this->maxPendingMessagesPerSubscription,
+                    'pending_bytes' => $pendingBytesSum,
+                    'max_pending_bytes' => $this->maxPendingBytesPerSubscription,
                 ]);
 
                 return false;
             }
 
             throw new SlowConsumerException(sprintf(
-                'Slow consumer detected for sid "%s": pending=%d max=%d',
+                'Slow consumer detected for sid "%s": pending=%d max=%d pending_bytes=%d max_bytes=%s',
                 $sid,
-                $pending,
+                $pendingMessages,
                 $this->maxPendingMessagesPerSubscription,
+                $pendingBytesSum,
+                (string) $this->maxPendingBytesPerSubscription,
             ));
         }
 
-        $this->pendingMessagesBySid[$sid] = $pending;
+        $this->pendingMessagesBySid[$sid] = $pendingMessages;
+        $this->pendingBytesBySid[$sid]    = $pendingBytesSum;
 
         return true;
     }
 
-    private function releasePendingSlot(string $sid): void
+    private function releasePendingSlot(string $sid, int $pendingBytes): void
     {
-        $pending = ($this->pendingMessagesBySid[$sid] ?? 1) - 1;
-        if ($pending <= 0) {
-            unset($this->pendingMessagesBySid[$sid]);
+        $pendingMessages = ($this->pendingMessagesBySid[$sid] ?? 1) - 1;
+        $pendingBytesSum = ($this->pendingBytesBySid[$sid] ?? 0) - $pendingBytes;
 
-            return;
+        if ($pendingMessages <= 0) {
+            unset($this->pendingMessagesBySid[$sid]);
+        } else {
+            $this->pendingMessagesBySid[$sid] = $pendingMessages;
         }
 
-        $this->pendingMessagesBySid[$sid] = $pending;
+        if ($pendingBytesSum <= 0) {
+            unset($this->pendingBytesBySid[$sid]);
+        } else {
+            $this->pendingBytesBySid[$sid] = $pendingBytesSum;
+        }
+    }
+
+    private function extractMessageSize(MsgMessageInterface|HMsgMessageInterface $message): int
+    {
+        if ($message instanceof HMsgMessageInterface) {
+            return $message->getTotalSize();
+        }
+
+        return $message->getPayloadSize();
     }
 
     private function processErr(NatsProtocolMessageInterface $message): null

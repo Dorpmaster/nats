@@ -10,6 +10,8 @@ use Amp\Socket\RetrySocketConnector;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\MessageDispatcher;
+use Dorpmaster\Nats\Client\SlowConsumerPolicy;
+use Dorpmaster\Nats\Client\SubscriptionStorage;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
 use Dorpmaster\Nats\Event\EventDispatcher;
@@ -37,9 +39,17 @@ $config = new ConnectionConfiguration('nats', 4222);
 $connection = new Connection($connector, $config, $logger);
 $clientConfiguration = new ClientConfiguration();
 $eventDispatcher = new EventDispatcher();
+$storage = new SubscriptionStorage();
 
 $connectionInfo = new ConnectInfo(false, false, false, 'php', '8.3');
-$messageDispatcher = new MessageDispatcher($connectionInfo, $logger);
+$messageDispatcher = new MessageDispatcher(
+    connectInfo: $connectionInfo,
+    storage: $storage,
+    logger: $logger,
+    maxPendingMessagesPerSubscription: 1000,
+    slowConsumerPolicy: SlowConsumerPolicy::ERROR,
+    maxPendingBytesPerSubscription: 2_000_000,
+);
 
 $client = new Client(
     $clientConfiguration,
@@ -47,7 +57,8 @@ $client = new Client(
     $connection,
     $eventDispatcher,
     $messageDispatcher,
-    $logger
+    $storage,
+    $logger,
 );
 
 try {

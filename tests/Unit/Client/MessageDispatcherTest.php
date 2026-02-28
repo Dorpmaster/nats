@@ -310,4 +310,126 @@ final class MessageDispatcherTest extends TestCase
         self::assertNull($response2);
         self::assertSame(2, $calls);
     }
+
+    public function testPendingBytesExceedTriggersErrorPolicy(): void
+    {
+        // Arrange
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
+        $storage->method('get')->willReturn(static fn(): null => null);
+
+        $dispatcher = new MessageDispatcher(
+            $connectInfo,
+            $storage,
+            null,
+            maxPendingMessagesPerSubscription: 10,
+            slowConsumerPolicy: SlowConsumerPolicy::ERROR,
+            maxPendingBytesPerSubscription: 5,
+        );
+
+        // Assert
+        self::expectException(SlowConsumerException::class);
+        self::expectExceptionMessage('Slow consumer detected for sid "sid"');
+
+        // Act
+        $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload'));
+    }
+
+    public function testPendingBytesDropNewPolicyDropsOverflowAndKeepsDispatcherWorking(): void
+    {
+        // Arrange
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
+        $calls       = 0;
+        $dispatcher  = null;
+
+        $storage->method('get')
+            ->willReturn(static function () use (&$calls, &$dispatcher) {
+                $calls++;
+                if ($calls === 1) {
+                    assert($dispatcher instanceof MessageDispatcher);
+                    $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'aaaa'));
+                }
+
+                return null;
+            });
+
+        $dispatcher = new MessageDispatcher(
+            $connectInfo,
+            $storage,
+            null,
+            maxPendingMessagesPerSubscription: 10,
+            slowConsumerPolicy: SlowConsumerPolicy::DROP_NEW,
+            maxPendingBytesPerSubscription: 5,
+        );
+
+        // Act
+        $response1 = $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'bbb'));
+        $response2 = $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'ccc'));
+
+        // Assert
+        self::assertNull($response1);
+        self::assertNull($response2);
+        self::assertSame(2, $calls);
+    }
+
+    public function testPendingBytesAreReleasedAfterHandlerCompletes(): void
+    {
+        // Arrange
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
+        $calls       = 0;
+
+        $storage->method('get')
+            ->willReturn(static function () use (&$calls): null {
+                $calls++;
+
+                return null;
+            });
+
+        $dispatcher = new MessageDispatcher(
+            $connectInfo,
+            $storage,
+            null,
+            maxPendingMessagesPerSubscription: 10,
+            slowConsumerPolicy: SlowConsumerPolicy::ERROR,
+            maxPendingBytesPerSubscription: 5,
+        );
+
+        // Act
+        $response1 = $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'aaaaa'));
+        $response2 = $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'bbbbb'));
+
+        // Assert
+        self::assertNull($response1);
+        self::assertNull($response2);
+        self::assertSame(2, $calls);
+    }
+
+    public function testReleaseWithoutPriorIncrementDoesNotCreateNegativePendingBytes(): void
+    {
+        // Arrange
+        $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
+        $storage     = self::createStub(SubscriptionStorageInterface::class);
+        $dispatcher  = new MessageDispatcher($connectInfo, $storage);
+        $invoke      = \Closure::bind(
+            static function (MessageDispatcher $target): array {
+                $target->releasePendingSlot('sid', 42);
+
+                return [
+                    $target->pendingMessagesBySid,
+                    $target->pendingBytesBySid,
+                ];
+            },
+            null,
+            MessageDispatcher::class,
+        );
+
+        // Act
+        [$pendingMessagesBySid, $pendingBytesBySid] = $invoke($dispatcher);
+
+        // Assert
+        self::assertArrayNotHasKey('sid', $pendingMessagesBySid);
+        self::assertArrayNotHasKey('sid', $pendingBytesBySid);
+    }
 }

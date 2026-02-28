@@ -40,7 +40,20 @@ Details:
 
 ## Backpressure
 
-Slow-consumer handling is documented here:
+Inbound slow-consumer limits are configured in `MessageDispatcher` (not in `ClientConfiguration`):
+
+```php
+$dispatcher = new MessageDispatcher(
+    connectInfo: $connectInfo,
+    storage: $storage,
+    logger: $logger,
+    maxPendingMessagesPerSubscription: 1000,
+    slowConsumerPolicy: SlowConsumerPolicy::ERROR,
+    maxPendingBytesPerSubscription: 2_000_000,
+);
+```
+
+Details:
 
 - [docs/backpressure.md](docs/backpressure.md)
 

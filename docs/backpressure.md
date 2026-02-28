@@ -3,10 +3,14 @@
 ## Current scope
 
 Backpressure v1 is implemented at message-dispatcher level with per-subscription pending message limits.
+`ClientConfiguration` does not apply inbound backpressure settings.
 
 ## Controls
 
+Configure these values directly in `MessageDispatcher` constructor:
+
 - `maxPendingMessagesPerSubscription` (default: `1000`)
+- `maxPendingBytesPerSubscription` (default: `2000000`, `null` disables bytes limit)
 - `slowConsumerPolicy`:
   - `ERROR` (default): throw `SlowConsumerException`
   - `DROP_NEW`: drop overflow messages
@@ -14,7 +18,7 @@ Backpressure v1 is implemented at message-dispatcher level with per-subscription
 ## Behavior
 
 - pending counters are incremented before handler invocation,
-- counters are decremented in `finally`, even when handler throws,
+- pending counters (messages + bytes) are decremented in `finally`, even when handler throws,
 - on overflow:
   - `ERROR` stops normal processing with an explicit exception,
   - `DROP_NEW` drops only the new message and keeps dispatcher alive.
@@ -22,4 +26,5 @@ Backpressure v1 is implemented at message-dispatcher level with per-subscription
 ## Notes
 
 - This is v1 minimal protection.
-- Byte-based limits and write-buffer limits are not yet implemented.
+- Inbound byte limit is applied to `MSG` payload size and `HMSG` total size (`headers + payload`).
+- Outbound write-buffer limits are not yet implemented.
