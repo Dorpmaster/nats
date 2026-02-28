@@ -16,6 +16,7 @@ use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\MessageDispatcher;
 use Dorpmaster\Nats\Client\WriteBufferPolicy;
 use Dorpmaster\Nats\Client\SubscriptionStorage;
+use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
@@ -210,6 +211,57 @@ final class ClientReconnectIntegrationTest extends TestCase
         });
     }
 
+    public function testDrainAfterRecoveryWithBufferedMessagesDoesNotHang(): void
+    {
+        $this->setTimeout(40);
+        $this->runAsyncTest(function () {
+            // Arrange
+            $client  = $this->createReconnectClient(new ClientConfiguration(
+                reconnectEnabled: true,
+                maxReconnectAttempts: 20,
+                reconnectBackoffInitialMs: 50,
+                reconnectBackoffMaxMs: 500,
+                reconnectBackoffMultiplier: 2.0,
+                reconnectJitterFraction: 0.0,
+                maxWriteBufferMessages: 50,
+                maxWriteBufferBytes: 20_000,
+                writeBufferPolicy: WriteBufferPolicy::ERROR,
+                bufferWhileReconnecting: true,
+            ));
+            $subject = sprintf('it.reconnect.drain.%s', bin2hex(random_bytes(6)));
+
+            try {
+                $client->connect();
+                NatsServerHarness::stop();
+                NatsServerHarness::waitUntilDown();
+                $this->awaitClientState($client, ClientState::RECONNECTING, 2.0);
+
+                for ($i = 0; $i < 10; $i++) {
+                    try {
+                        $client->publish(new PubMessage($subject, 'buffered-' . $i));
+                    } catch (\Throwable) {
+                        // Reconnect is still converging; bounded retries are expected.
+                    }
+                }
+
+                NatsServerHarness::start();
+                NatsServerHarness::waitUntilReady();
+
+                // Act
+                $startedAt = microtime(true);
+                $client->drain(3000);
+                $elapsed = microtime(true) - $startedAt;
+
+                // Assert
+                self::assertSame(ClientState::CLOSED, $client->getState());
+                self::assertLessThan(3.2, $elapsed);
+            } finally {
+                NatsServerHarness::ensureUp();
+                $client->disconnect();
+            }
+        });
+    }
+
     private function createReconnectClient(ClientConfiguration|null $clientConfiguration = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
@@ -274,5 +326,15 @@ final class ClientReconnectIntegrationTest extends TestCase
         }
 
         self::assertGreaterThanOrEqual($expectedCount, count($received));
+    }
+
+    private function awaitClientState(Client $client, ClientState $state, float $timeoutSeconds): void
+    {
+        $deadline = microtime(true) + $timeoutSeconds;
+        while ($client->getState() !== $state && microtime(true) < $deadline) {
+            delay(0.01);
+        }
+
+        self::assertSame($state, $client->getState());
     }
 }

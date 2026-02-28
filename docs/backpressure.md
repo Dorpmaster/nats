@@ -40,6 +40,12 @@ Controls (`ClientConfiguration`):
   - `DROP_NEW`: drop only the new message
 - `bufferWhileReconnecting` (default: `false`)
 
+Architecture:
+
+- `Client` validates lifecycle/state and delegates outbound frames to `WriteBufferService`,
+- `WriteBufferService` owns queue, pending counters, overflow policy, writer-loop lifecycle and drain/flush.
+- frame size is calculated once in `OutboundFrameBuilder` (`bytes === strlen(frame data)`).
+
 State behavior for `publish()`/`request()`:
 
 - `CONNECTED`: enqueue and write through writer-loop
@@ -51,3 +57,4 @@ State behavior for `publish()`/`request()`:
 Drain semantics:
 
 - `drain()` rejects new enqueue, flushes queued outbound messages, then closes connection.
+- failed write frame is retained separately and is sent first after reconnect without double-counting pending counters.

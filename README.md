@@ -68,6 +68,8 @@ $clientConfig = new ClientConfiguration(
 );
 ```
 
+Runtime model: `Client` delegates outbound queueing/sending to `WriteBufferService` (queue + writer-loop + drain).
+
 ## Testing
 
 - Unit: `make phpunit`
