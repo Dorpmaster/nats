@@ -24,6 +24,10 @@ interface WriteBufferInterface
 
     public function getPendingBytes(): int;
 
+    public function isRunning(): bool;
+
+    public function hasFailedFrame(): bool;
+
     /** @param \Closure(\Throwable):void|null $handler */
     public function setFailureHandler(\Closure|null $handler): void;
 }

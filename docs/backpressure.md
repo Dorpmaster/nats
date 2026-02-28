@@ -45,6 +45,7 @@ Architecture:
 - `Client` validates lifecycle/state and delegates outbound frames to `WriteBufferService`,
 - `WriteBufferService` owns queue, pending counters, overflow policy, writer-loop lifecycle and drain/flush.
 - frame size is calculated once in `OutboundFrameBuilder` (`bytes === strlen(frame data)`).
+- diagnostics helpers: `isRunning()`, `getPendingMessages()`, `getPendingBytes()`, `hasFailedFrame()`.
 
 State behavior for `publish()`/`request()`:
 

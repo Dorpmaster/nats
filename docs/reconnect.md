@@ -35,8 +35,13 @@ Reconnect is triggered when the active connection drops due to:
   - default: `EventLoopDelayStrategy`
   - tests: `ImmediateDelayStrategy` / `RecordingDelayStrategy`
   - strategy receives optional `Cancellation`; `close()` / `drain()` cancel active backoff immediately
+- Backoff lifecycle uses `epoch` guard:
+  - each transition to `RECONNECTING` increments epoch and replaces reconnect token,
+  - stale wakeups (`epoch` changed or state no longer `RECONNECTING`) are ignored without side-effects.
 - Reconnect does not create additional receive loops: one loop remains active.
 - Existing subscriptions are restored automatically after reconnect handshake (after `INFO`).
+- `ReconnectBackoffService` never mutates client state directly; it only computes/waits delay and may throw
+  `CancelledException` as normal lifecycle control flow.
 
 ## Publish / Request Behavior
 

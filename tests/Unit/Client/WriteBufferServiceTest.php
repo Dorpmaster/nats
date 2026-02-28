@@ -117,6 +117,7 @@ final class WriteBufferServiceTest extends TestCase
             self::assertSame([(string) $frameA->message, (string) $frameB->message], $sent);
             self::assertSame(0, $service->getPendingMessages());
             self::assertSame(0, $service->getPendingBytes());
+            self::assertFalse($service->hasFailedFrame());
         });
     }
 
@@ -140,8 +141,59 @@ final class WriteBufferServiceTest extends TestCase
             $service->detach();
             $service->start($secondConnection);
             $service->drain(1000);
+            $this->forceTick();
 
             // Assert
+            self::assertSame(0, $service->getPendingMessages());
+            self::assertSame(0, $service->getPendingBytes());
+            self::assertFalse($service->isRunning());
+        });
+    }
+
+    public function testStartTwiceDoesNotCreateSecondLoop(): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function () {
+            // Arrange
+            $sent       = 0;
+            $connection = $this->createConnection(static function () use (&$sent): void {
+                $sent++;
+            });
+            $service    = new WriteBufferService(10, 10_000, WriteBufferPolicy::ERROR);
+            $frame      = (new OutboundFrameBuilder())->build(new PubMessage('s', 'payload'));
+
+            // Act
+            $service->start($connection);
+            $service->start($connection);
+            $service->enqueue($frame);
+            $this->forceTick();
+
+            // Assert
+            self::assertSame(1, $sent);
+            self::assertTrue($service->isRunning());
+        });
+    }
+
+    public function testStopIsIdempotentAndCancelsLoop(): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function () {
+            // Arrange
+            $connection = $this->createConnection(static function (): void {
+            });
+            $service    = new WriteBufferService(10, 10_000, WriteBufferPolicy::ERROR);
+            $service->start($connection);
+            $service->enqueue((new OutboundFrameBuilder())->build(new PubMessage('s', 'payload')));
+            $this->forceTick();
+
+            // Act
+            $service->stop();
+            $service->stop();
+            $this->forceTick();
+
+            // Assert
+            self::assertFalse($service->isRunning());
+            self::assertFalse($service->hasFailedFrame());
             self::assertSame(0, $service->getPendingMessages());
             self::assertSame(0, $service->getPendingBytes());
         });

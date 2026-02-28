@@ -51,6 +51,8 @@ final class Client implements ClientInterface
     // A signal indicating that there are messages being processed.
     private DeferredFuture|null $deferredDispatching                = null;
     private DeferredCancellation|null $reconnectBackoffCancellation = null;
+    private int $reconnectBackoffEpoch                              = 0;
+    private int|null $activeReconnectBackoffEpoch                   = null;
     /** @var array<string, string> */
     private array $subscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
@@ -574,15 +576,18 @@ final class Client implements ClientInterface
                 ]);
             }
 
-            $this->waitReconnectBackoff($attempt);
-            if ($this->status !== ClientState::RECONNECTING) {
+            if (!$this->waitReconnectBackoff($attempt, $this->activeReconnectBackoffEpoch)) {
                 return false;
             }
         }
     }
 
-    private function waitReconnectBackoff(int $attempt): void
+    private function waitReconnectBackoff(int $attempt, int|null $epoch): bool
     {
+        if ($epoch === null || !$this->isReconnectBackoffContextActive($epoch)) {
+            return false;
+        }
+
         try {
             $this->reconnectBackoffService->wait(
                 $attempt,
@@ -590,10 +595,14 @@ final class Client implements ClientInterface
                 $this->reconnectBackoffCancellation?->getCancellation(),
             );
         } catch (CancelledException) {
-            if ($this->status === ClientState::RECONNECTING) {
-                $this->transitionTo(ClientState::CLOSED, 'reconnect delay cancelled');
+            if ($this->isReconnectBackoffContextActive($epoch)) {
+                $this->logger?->debug('Reconnect backoff cancelled while reconnect context is still active');
             }
+
+            return false;
         }
+
+        return $this->isReconnectBackoffContextActive($epoch);
     }
 
     private function restoreSubscriptions(): void
@@ -650,9 +659,12 @@ final class Client implements ClientInterface
         if ($targetState === ClientState::RECONNECTING) {
             $this->reconnectBackoffCancellation?->cancel();
             $this->reconnectBackoffCancellation = new DeferredCancellation();
+            $this->reconnectBackoffEpoch++;
+            $this->activeReconnectBackoffEpoch = $this->reconnectBackoffEpoch;
         } elseif ($previous === ClientState::RECONNECTING) {
             $this->reconnectBackoffCancellation?->cancel();
             $this->reconnectBackoffCancellation = null;
+            $this->activeReconnectBackoffEpoch  = null;
         }
 
         if (in_array($targetState, [ClientState::RECONNECTING, ClientState::CLOSED], true)) {
@@ -706,5 +718,10 @@ final class Client implements ClientInterface
     public function getState(): ClientState
     {
         return $this->status;
+    }
+
+    private function isReconnectBackoffContextActive(int $epoch): bool
+    {
+        return $this->status === ClientState::RECONNECTING && $this->activeReconnectBackoffEpoch === $epoch;
     }
 }

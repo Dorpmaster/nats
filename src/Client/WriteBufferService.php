@@ -48,7 +48,12 @@ final class WriteBufferService implements WriteBufferInterface
 
     public function start(ConnectionInterface $connection): void
     {
-        $this->connection       = $connection;
+        $this->connection = $connection;
+
+        if ($this->writerRunning) {
+            return;
+        }
+
         $this->loopCancellation = new DeferredCancellation();
         $this->scheduleWriter();
     }
@@ -130,6 +135,16 @@ final class WriteBufferService implements WriteBufferInterface
     public function getPendingBytes(): int
     {
         return $this->pendingBytes;
+    }
+
+    public function isRunning(): bool
+    {
+        return $this->writerRunning;
+    }
+
+    public function hasFailedFrame(): bool
+    {
+        return $this->failedFrame !== null;
     }
 
     private function scheduleWriter(): void
