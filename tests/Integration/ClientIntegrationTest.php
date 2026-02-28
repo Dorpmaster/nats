@@ -17,6 +17,7 @@ use Dorpmaster\Nats\Client\MessageDispatcher;
 use Dorpmaster\Nats\Client\SubscriptionStorage;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
+use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
@@ -41,7 +42,7 @@ final class ClientIntegrationTest extends TestCase
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
             // Arrange
-            $client = $this->createClient();
+            $client  = $this->createClient();
             $subject = sprintf('it.lifecycle.%s', bin2hex(random_bytes(6)));
 
             try {
@@ -50,7 +51,7 @@ final class ClientIntegrationTest extends TestCase
                 $client->disconnect();
                 $client->disconnect();
                 $client->connect();
-                $sid = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
+                $sid      = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
                     return new PubMessage((string) $message->getReplyTo(), 'ok');
                 });
                 $response = $client->request(new PubMessage($subject, 'ping'), 1);
@@ -110,7 +111,7 @@ final class ClientIntegrationTest extends TestCase
             try {
                 // Act
                 $client->connect();
-                $sid = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
+                $sid      = $client->subscribe($subject, static function (MsgMessageInterface&NatsProtocolMessageInterface $message): PubMessageInterface {
                     return new PubMessage((string) $message->getReplyTo(), 'pong');
                 });
                 $response = $client->request(new PubMessage($subject, 'ping'), 1);
@@ -154,6 +155,45 @@ final class ClientIntegrationTest extends TestCase
             } catch (CancelledException $exception) {
                 self::assertInstanceOf(TimeoutException::class, $exception->getPrevious());
                 self::assertSame(0, $deliveries);
+            } finally {
+                $client->disconnect();
+            }
+        });
+    }
+
+    public function testDrainClosesClientAndRejectsNewPublish(): void
+    {
+        $this->setTimeout(30);
+        $this->runAsyncTest(function () {
+            // Arrange
+            $client   = $this->createClient();
+            $subject  = sprintf('it.drain.%s', bin2hex(random_bytes(6)));
+            $deferred = new DeferredFuture();
+
+            try {
+                $client->connect();
+                $sid = $client->subscribe($subject, static function (NatsProtocolMessageInterface $message) use ($deferred): null {
+                    if (!$deferred->isComplete()) {
+                        $deferred->complete($message->getPayload());
+                    }
+
+                    return null;
+                });
+                $client->publish(new PubMessage($subject, 'before-drain'));
+                $payload = $deferred->getFuture()->await(new TimeoutCancellation(1));
+                $client->unsubscribe($sid);
+
+                // Act
+                $client->drain();
+
+                // Assert
+                self::assertSame('before-drain', $payload);
+                try {
+                    $client->publish(new PubMessage($subject, 'after-drain'));
+                    self::fail('Expected publish to fail when client is closed after drain');
+                } catch (ConnectionException $exception) {
+                    self::assertStringContainsString('Could not publish while client state is CLOSED', $exception->getMessage());
+                }
             } finally {
                 $client->disconnect();
             }

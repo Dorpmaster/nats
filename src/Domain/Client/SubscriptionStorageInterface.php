@@ -13,4 +13,7 @@ interface SubscriptionStorageInterface
     public function get(string $sid): Closure|null;
 
     public function remove(string $sid): void;
+
+    /** @return array<string, Closure> */
+    public function all(): array;
 }
