@@ -99,7 +99,21 @@ Cluster discovery groundwork is available:
 - `INFO.connect_urls` can be discovered and added to an internal server pool
 
 Reconnect failover can switch to the next node in server pool and mark failed node as temporarily dead.
-Docker cluster integration coverage is planned in the next iteration.
+Server is marked dead only when `open()` to that server fails.
+
+Example seed list:
+
+```php
+$config = new ClientConfiguration(
+    reconnectEnabled: true,
+    servers: [
+        new ServerAddress('n1', 4222),
+        new ServerAddress('n2', 4222),
+        new ServerAddress('n3', 4222),
+    ],
+    deadServerCooldownMs: 2000,
+);
+```
 
 Details:
 

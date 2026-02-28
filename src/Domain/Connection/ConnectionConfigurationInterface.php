@@ -12,5 +12,7 @@ interface ConnectionConfigurationInterface
 
     public function getQueueBufferSize(): int;
 
+    public function getConnectTimeout(): float;
+
     public function getTlsConfiguration(): TlsConfiguration;
 }

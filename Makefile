@@ -13,9 +13,15 @@ NATS_NETWORK := nats-client-test-network
 NATS_TLS_COMPOSE_FILE := docker/compose.nats.tls.test.yml
 NATS_TLS_PROJECT := nats-it-tls
 NATS_TLS_NETWORK := nats-client-tls-test-network
+NATS_CLUSTER_COMPOSE_FILE := docker/compose.nats.cluster.test.yml
+NATS_CLUSTER_PROJECT := nats-cluster-it
+NATS_CLUSTER_NETWORK := nats-client-cluster-test-network
 DOCKER_SOCKET_HOST := $(shell if [ -S /var/run/docker.sock ]; then echo /var/run/docker.sock; elif [ -S $$HOME/.docker/run/docker.sock ]; then echo $$HOME/.docker/run/docker.sock; fi)
 NATS_CONTAINER := $(NATS_PROJECT)-nats-1
 NATS_TLS_CONTAINER := $(NATS_TLS_PROJECT)-nats-1
+NATS_CLUSTER_N1_CONTAINER := $(NATS_CLUSTER_PROJECT)-n1-1
+NATS_CLUSTER_N2_CONTAINER := $(NATS_CLUSTER_PROJECT)-n2-1
+NATS_CLUSTER_N3_CONTAINER := $(NATS_CLUSTER_PROJECT)-n3-1
 # ...and turn them into do-nothing targets
 $(eval $(RUN_ARGS):;@:)
 
@@ -65,6 +71,20 @@ nats-tls-down:
 	docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans
 	if docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then \
 		docker network rm $(NATS_TLS_NETWORK) || true; \
+	fi
+
+.PHONY: cluster-up
+cluster-up:
+	if ! docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_CLUSTER_NETWORK); \
+	fi
+	docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) up -d --wait --remove-orphans
+
+.PHONY: cluster-down
+cluster-down:
+	docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans
+	if docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
+		docker network rm $(NATS_CLUSTER_NETWORK) || true; \
 	fi
 
 .PHONY: nats-restart
@@ -152,6 +172,28 @@ integration-tls: build
 		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
 		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
 		nats-client composer integration:tls
+
+.PHONY: integration-cluster
+integration-cluster: build
+	set -e
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
+	trap 'docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_CLUSTER_NETWORK) || true; fi' EXIT
+	if ! docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_CLUSTER_NETWORK); \
+	fi
+	docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) up -d --wait --remove-orphans
+	docker run --rm --interactive \
+		--user root \
+		--network=$(NATS_CLUSTER_NETWORK) \
+		--env NATS_CLUSTER=1 \
+		--env NATS_HOST=n1 \
+		--env NATS_PORT=4222 \
+		--env NATS_CLUSTER_N1_CONTAINER=$(NATS_CLUSTER_N1_CONTAINER) \
+		--env NATS_CLUSTER_N2_CONTAINER=$(NATS_CLUSTER_N2_CONTAINER) \
+		--env NATS_CLUSTER_N3_CONTAINER=$(NATS_CLUSTER_N3_CONTAINER) \
+		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
+		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
+		nats-client composer integration:cluster
 
 .PHONY: phpcs
 phpcs: build

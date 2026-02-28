@@ -15,9 +15,14 @@ final readonly class ConnectionConfiguration implements ConnectionConfigurationI
         private int $port,
         private int $queueBufferSize = 1000,
         private TlsConfiguration|null $tls = null,
+        private float $connectTimeout = 1.0,
     ) {
         if ($this->queueBufferSize < 0) {
             throw new InvalidArgumentException('Queue Buffer Size value must be a positive number or zero');
+        }
+
+        if ($this->connectTimeout <= 0) {
+            throw new InvalidArgumentException('Connect timeout must be greater than zero');
         }
     }
 
@@ -34,6 +39,11 @@ final readonly class ConnectionConfiguration implements ConnectionConfigurationI
     public function getQueueBufferSize(): int
     {
         return $this->queueBufferSize;
+    }
+
+    public function getConnectTimeout(): float
+    {
+        return $this->connectTimeout;
     }
 
     public function getTlsConfiguration(): TlsConfiguration

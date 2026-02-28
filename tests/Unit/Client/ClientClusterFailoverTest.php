@@ -31,10 +31,10 @@ final class ClientClusterFailoverTest extends TestCase
         $pool->method('allServers')->willReturn([$a, $b]);
         $pool->expects(self::exactly(2))
             ->method('getCurrent')
-            ->willReturn(null);
-        $pool->expects(self::exactly(2))
+            ->willReturn($a);
+        $pool->expects(self::once())
             ->method('nextServer')
-            ->willReturnOnConsecutiveCalls($a, $b);
+            ->willReturn($b);
         $pool->expects(self::once())
             ->method('setCurrent')
             ->with($b);
@@ -100,6 +100,78 @@ final class ClientClusterFailoverTest extends TestCase
         self::assertEquals([$a, $b], $usedServers);
     }
 
+    public function testReconnectTriesCurrentFirstAndDoesNotMarkDeadWhenOpenSucceeds(): void
+    {
+        // Arrange
+        $a = new ServerAddress('nats-a', 4222);
+
+        $pool = self::createMock(ServerPoolInterface::class);
+        $pool->method('allServers')->willReturn([$a]);
+        $pool->expects(self::once())
+            ->method('getCurrent')
+            ->willReturn($a);
+        $pool->expects(self::never())
+            ->method('nextServer');
+        $pool->expects(self::once())
+            ->method('setCurrent')
+            ->with($a);
+        $pool->expects(self::never())
+            ->method('markDead');
+
+        $connection  = self::createMock(ServerSelectableConnectionInterface::class);
+        $usedServers = [];
+        $connection->expects(self::once())
+            ->method('useServer')
+            ->willReturnCallback(static function (ServerAddress $server) use (&$usedServers): void {
+                $usedServers[] = $server;
+            });
+        $connection->expects(self::once())
+            ->method('close');
+        $connection->expects(self::once())
+            ->method('open');
+        $connection->method('isClosed')->willReturn(false);
+        $connection->method('receive')->willReturn(null);
+        $connection->method('send');
+
+        $client = $this->createClient(
+            connection: $connection,
+            pool: $pool,
+            configuration: new ClientConfiguration(
+                reconnectEnabled: true,
+                maxReconnectAttempts: 2,
+                reconnectBackoffInitialMs: 10,
+                reconnectBackoffMaxMs: 100,
+                reconnectBackoffMultiplier: 2.0,
+                reconnectJitterFraction: 0.0,
+                deadServerCooldownMs: 10_000,
+            ),
+        );
+
+        $setState     = \Closure::bind(
+            static function (Client $target): void {
+                $target->status = ClientState::CONNECTED;
+            },
+            null,
+            Client::class,
+        );
+        $tryReconnect = \Closure::bind(
+            static function (Client $target): bool {
+                return $target->tryReconnect(new \RuntimeException('read failed'));
+            },
+            null,
+            Client::class,
+        );
+
+        // Act
+        $setState($client);
+        $result = $tryReconnect($client);
+
+        // Assert
+        self::assertTrue($result);
+        self::assertSame(ClientState::CONNECTED, $client->getState());
+        self::assertEquals([$a], $usedServers);
+    }
+
     public function testReconnectExhaustsAttemptsAcrossServersAndClosesClient(): void
     {
         // Arrange
@@ -112,10 +184,10 @@ final class ClientClusterFailoverTest extends TestCase
         $pool->method('allServers')->willReturn([$a, $b]);
         $pool->expects(self::exactly(2))
             ->method('getCurrent')
-            ->willReturn(null);
-        $pool->expects(self::exactly(2))
+            ->willReturn($a);
+        $pool->expects(self::once())
             ->method('nextServer')
-            ->willReturnOnConsecutiveCalls($a, $b);
+            ->willReturn($b);
         $pool->expects(self::never())
             ->method('setCurrent');
         $pool->expects(self::exactly(2))
@@ -178,7 +250,7 @@ final class ClientClusterFailoverTest extends TestCase
         self::assertFalse($result);
         self::assertSame(ClientState::CLOSED, $client->getState());
         self::assertSame([10, 20], $delayStrategy->delays());
-        self::assertEquals([$a, $b], $usedServers);
+        self::assertEquals([$a, $b], $usedServers); // Current first, then next pool candidate.
         self::assertCount(2, $marked);
         self::assertTrue($marked[0][0]->equals($a));
         self::assertTrue($marked[1][0]->equals($b));

@@ -199,7 +199,12 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
 
     private function createConnectContext(): ConnectContext
     {
-        $context = new ConnectContext();
+        $connectTimeout = $this->configuration->getConnectTimeout();
+        if ($connectTimeout <= 0) {
+            $connectTimeout = 1.0;
+        }
+
+        $context = (new ConnectContext())->withConnectTimeout($connectTimeout);
         $tls     = $this->configuration->getTlsConfiguration();
         if (!$tls->isEnabled()) {
             return $context;

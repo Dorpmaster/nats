@@ -1,0 +1,38 @@
+services:
+  n1:
+    image: nats:2-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./nats/cluster/n1.conf:/etc/nats/nats.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/varz"]
+      interval: 1s
+      timeout: 1s
+      retries: 20
+
+  n2:
+    image: nats:2-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./nats/cluster/n2.conf:/etc/nats/nats.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/varz"]
+      interval: 1s
+      timeout: 1s
+      retries: 20
+
+  n3:
+    image: nats:2-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./nats/cluster/n3.conf:/etc/nats/nats.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/varz"]
+      interval: 1s
+      timeout: 1s
+      retries: 20
+
+networks:
+  default:
+    external: true
+    name: nats-client-cluster-test-network

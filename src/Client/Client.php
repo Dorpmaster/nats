@@ -192,8 +192,6 @@ final class Client implements ClientInterface
 
         $this->logger?->debug('Starting a microtask that processes the messages');
         EventLoop::queue(function () {
-            $pendingResubscribe = false;
-
             $this->logger?->debug('Starting to processes the messages');
             while (in_array($this->status, [ClientState::CONNECTED, ClientState::RECONNECTING], true)) {
                 $this->logger?->debug('Getting a message');
@@ -207,8 +205,6 @@ final class Client implements ClientInterface
                     if (!$this->tryReconnect($exception)) {
                         return;
                     }
-
-                    $pendingResubscribe = true;
 
                     continue;
                 }
@@ -227,8 +223,6 @@ final class Client implements ClientInterface
                         if (!$this->tryReconnect()) {
                             return;
                         }
-
-                        $pendingResubscribe = true;
                     }
 
                     continue;
@@ -271,11 +265,6 @@ final class Client implements ClientInterface
                             'message' => $message,
                         ]);
                     }
-                }
-
-                if ($pendingResubscribe && $message->getType() === NatsMessageType::INFO) {
-                    $this->restoreSubscriptions();
-                    $pendingResubscribe = false;
                 }
 
                 if ($this->deferredDispatching->isComplete() === false) {
@@ -588,8 +577,9 @@ final class Client implements ClientInterface
 
         $this->transitionTo(ClientState::RECONNECTING, 'reconnect started');
 
-        $maxAttempts = $this->configuration->getMaxReconnectAttempts();
-        $attempt     = 0; // Count only real open() attempts.
+        $maxAttempts        = $this->configuration->getMaxReconnectAttempts();
+        $attempt            = 0; // Count only real open() attempts.
+        $triedCurrentServer = false;
 
         while (true) {
             if ($maxAttempts !== null && $attempt >= $maxAttempts) {
@@ -603,7 +593,7 @@ final class Client implements ClientInterface
                 return false;
             }
 
-            $server          = $this->selectServerForReconnect();
+            $server          = $this->selectServerForReconnect($triedCurrentServer);
             $hasKnownServers = $this->serverPool->allServers() !== [];
             if ($server === null && $hasKnownServers) {
                 if (!$this->waitReconnectBackoff(max(1, $attempt + 1), $this->activeReconnectBackoffEpoch)) {
@@ -624,6 +614,7 @@ final class Client implements ClientInterface
                     $this->serverPool->setCurrent($server);
                 }
                 $this->transitionTo(ClientState::CONNECTED, 'reconnect succeeded');
+                $this->restoreSubscriptions();
 
                 return true;
             } catch (Throwable $exception) {
@@ -648,14 +639,38 @@ final class Client implements ClientInterface
         return $this->serverPool->nextServer();
     }
 
-    private function selectServerForReconnect(): ServerAddress|null
+    private function selectServerForReconnect(bool &$triedCurrentServer): ServerAddress|null
     {
         $current = $this->serverPool->getCurrent();
-        if ($current !== null) {
-            $this->serverPool->markDead($current, $this->configuration->getDeadServerCooldownMs());
+        if (!$triedCurrentServer && $current !== null) {
+            $triedCurrentServer = true;
+
+            return $current;
         }
 
-        return $this->serverPool->nextServer();
+        $candidate = $this->serverPool->nextServer();
+        if ($candidate === null) {
+            return null;
+        }
+
+        if ($current === null || !$candidate->equals($current)) {
+            return $candidate;
+        }
+
+        $knownServers = $this->serverPool->allServers();
+        $maxRolls     = max(0, count($knownServers) - 1);
+        for ($roll = 0; $roll < $maxRolls; $roll++) {
+            $next = $this->serverPool->nextServer();
+            if ($next === null) {
+                return null;
+            }
+
+            if (!$next->equals($current)) {
+                return $next;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -839,6 +854,11 @@ final class Client implements ClientInterface
     public function getKnownServers(): array
     {
         return $this->serverPool->allServers();
+    }
+
+    public function getCurrentServer(): ServerAddress|null
+    {
+        return $this->serverPool->getCurrent();
     }
 
     private function isReconnectBackoffContextActive(int $epoch): bool
