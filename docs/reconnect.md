@@ -1,55 +1,51 @@
-# Reconnect v1
+# Reconnect
 
-## Overview
-
-Reconnect v1 is opt-in and enabled via `ClientConfiguration`.
+Reconnect is configured via `ClientConfiguration`.
 
 ```php
 $config = new ClientConfiguration(
     reconnectEnabled: true,
-    maxReconnectAttempts: 20,          // null => infinite
+    maxReconnectAttempts: 20, // null => infinite
     reconnectBackoffInitialMs: 50,
-    reconnectBackoffMaxMs: 500,
+    reconnectBackoffMaxMs: 1000,
     reconnectBackoffMultiplier: 2.0,
-    reconnectJitterFraction: 0.2,      // set 0.0 for deterministic tests
-    reconnectServers: ['nats://nats:4222'], // reserved for future multi-server routing
+    reconnectJitterFraction: 0.2,
+    deadServerCooldownMs: 2000,
 );
 ```
 
-## Disconnect Triggers
+## Backoff Formula
 
-Reconnect is triggered when the active connection drops due to:
+For attempt `n`:
 
-- socket EOF (`receive()` returns `null` and connection is closed),
-- read error (`receive()` throws),
-- parser fatal error surfaced through `receive()` (malformed/unknown frame).
+- `base = min(max, initial * multiplier^(n-1))`
+- `delay = base + random(0..base*jitterFraction)`
 
-`CancelledException` from receive path is treated as termination signal and stops receive-loop without reconnect.
+Delay waiting is delegated to `DelayStrategyInterface`.
 
-## Semantics
+## Cancellation Semantics
 
-- Reconnect retries are bounded by `maxReconnectAttempts` unless `null` (infinite).
-- Backoff is exponential: `initial * multiplier^(attempt-1)`, capped by `max`.
-- Jitter adds `0..(base * jitterFraction)` to each delay.
-- Reconnect delays are delegated to `DelayStrategyInterface`:
-  - default: `EventLoopDelayStrategy`
-  - tests: `ImmediateDelayStrategy` / `RecordingDelayStrategy`
-  - strategy receives optional `Cancellation`; `close()` / `drain()` cancel active backoff immediately
-- Backoff lifecycle uses `epoch` guard:
-  - each transition to `RECONNECTING` increments epoch and replaces reconnect token,
-  - stale wakeups (`epoch` changed or state no longer `RECONNECTING`) are ignored without side-effects.
-- Reconnect does not create additional receive loops: one loop remains active.
-- Existing subscriptions are restored automatically after reconnect handshake (after `INFO`).
-- `ReconnectBackoffService` never mutates client state directly; it only computes/waits delay and may throw
-  `CancelledException` as normal lifecycle control flow.
+- Backoff wait accepts `Cancellation`.
+- `close()` / `drain()` cancel active reconnect delay immediately.
+- `CancelledException` in backoff is lifecycle control flow, not a reconnect failure by itself.
 
-## Publish / Request Behavior
+## Epoch Guard
 
-- `publish()` during disconnection follows current connection contract (send is no-op on closed socket).
-- `request()` is **not silently retried**. During disconnect it ends by timeout/cancellation according to provided timeout.
+Reconnect wakeups are protected by epoch:
 
-## Limitations of v1
+- entering `RECONNECTING` increments reconnect epoch;
+- each wait captures epoch;
+- stale wakeup (`epoch` changed or state is no longer `RECONNECTING`) exits with no side effects.
 
-- `reconnectServers` are configuration-ready, but routing/rotation is not implemented yet (single configured server is used).
-- No durable buffering/queueing of publish while disconnected.
-- No JetStream features in reconnect flow.
+## Dead Server Policy
+
+- reconnect tries current server first;
+- server is marked dead only if `open()` to that server fails;
+- dead server is skipped until cooldown expires;
+- next candidate is selected from `ServerPoolService` round-robin set.
+
+## Request/Publish Semantics During Reconnect
+
+- `publish()/request()` fail-fast by default (`bufferWhileReconnecting=false`).
+- with `bufferWhileReconnecting=true`, frames are queued in outbound write buffer (bounded by configured limits).
+- `request()` is not silently retried.

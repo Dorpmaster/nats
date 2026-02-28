@@ -1,8 +1,6 @@
-# Connection / Client State Machine
+# State Machine
 
-## States
-
-Client lifecycle state is represented by [`ClientState` enum](../src/Domain/Client/ClientState.php).
+`Client` lifecycle is represented by `ClientState` enum:
 
 - `NEW`
 - `CONNECTING`
@@ -20,24 +18,24 @@ Client lifecycle state is represented by [`ClientState` enum](../src/Domain/Clie
 - `DRAINING -> CLOSED`
 - `CLOSED -> CONNECTING`
 
-## Main Transitions
+Illegal transitions are rejected.
 
-- `NEW -> CONNECTING -> CONNECTED` on successful `connect()`.
-- `CONNECTED -> RECONNECTING -> CONNECTED` on EOF/read/parser failures when reconnect is enabled.
-- `RECONNECTING -> CLOSED` when max reconnect attempts are exhausted.
-- `CONNECTED -> DRAINING -> CLOSED` on `drain()` / `disconnect()`.
-- `CLOSED -> CONNECTING` on reconnect after explicit close.
+## Method Contracts by State
 
-## Idempotency
+- `connect()`
+  - `NEW|CLOSED`: starts connect flow
+  - `CONNECTED`: no-op
+  - `CONNECTING|RECONNECTING|DRAINING`: waits for expected state with timeout
+- `publish()/request()`
+  - `CONNECTED`: allowed
+  - `CONNECTING|RECONNECTING`: allowed only when `bufferWhileReconnecting=true`, otherwise `ClientNotConnectedException`
+  - `DRAINING|CLOSED`: rejected
+- `drain()` / `disconnect()`
+  - idempotent
+  - transitions to `DRAINING`, then `CLOSED`
 
-- `connect()` is idempotent while already connected.
-- `disconnect()`/`drain()` are idempotent while already closed.
-- `Connection::open()` is idempotent on opened socket.
-- `Connection::send()` on closed socket is a no-op.
+## Reconnect Flow
 
-## send()/receive() Contract by State
+`CONNECTED -> RECONNECTING -> CONNECTED` happens on transport failures if reconnect is enabled.
 
-- `CONNECTED`: normal read/write flow.
-- `RECONNECTING`: receive loop attempts to restore connection; outgoing requests are not silently retried.
-- `DRAINING`: new publish/request are rejected; in-flight dispatch is finished, subscriptions are unsubscribed.
-- `CLOSED`: receive loop stopped.
+If attempts are exhausted, state moves to `CLOSED`.

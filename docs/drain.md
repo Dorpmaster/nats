@@ -1,25 +1,25 @@
-# Drain v1
+# Drain
 
-## Purpose
+`drain()` provides graceful shutdown semantics.
 
-`drain()` performs graceful shutdown:
+## Sequence
 
-1. transition to `DRAINING`,
-2. finish current in-flight dispatch (bounded by timeout),
-3. unsubscribe active subscriptions,
-4. close transport and transition to `CLOSED`.
-
-`disconnect()` delegates to `drain()`.
+1. State transitions to `DRAINING`.
+2. New publish/request operations are rejected.
+3. In-flight dispatch is allowed to finish (bounded by timeout).
+4. Active subscriptions are unsubscribed.
+5. Outbound write buffer is flushed.
+6. Connection is closed and state becomes `CLOSED`.
 
 ## API
 
 ```php
-$client->drain();          // default timeout
-$client->drain(5000);      // 5s timeout in milliseconds
+$client->drain();
+$client->drain(5_000); // timeout in ms
 ```
 
-## Semantics
+## Guarantees and Limits
 
-- `publish()` and `request()` during `DRAINING` / `CLOSED` fail predictably.
 - `drain()` is idempotent.
-- Reconnect is not started during `DRAINING`.
+- Reconnect is not started while draining.
+- Drain is best-effort under configured timeout and network conditions.

@@ -1,42 +1,38 @@
-# Metrics Hooks
+# Metrics
 
-Client metrics are exposed through a neutral collector interface:
+Metrics are emitted through `MetricsCollectorInterface`:
 
-- `Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface`
-- methods:
-  - `increment(string $counter, int $by = 1, array $tags = []): void`
-  - `observe(string $metric, float $value, array $tags = []): void`
+- `increment(string $counter, int $by = 1, array $tags = []): void`
+- `observe(string $metric, float $value, array $tags = []): void`
 
-By default the client uses `NullMetricsCollector` (no-op).
+If collector is not provided, `NullMetricsCollector` is used.
 
-## Emitted counters
+## Counters
 
 - `reconnect_count`
-  - incremented when reconnect succeeds (`RECONNECTING -> CONNECTED`)
+  - successful reconnect (`RECONNECTING -> CONNECTED`)
 - `reconnect_backoff_cancelled`
-  - incremented when reconnect backoff is cancelled by lifecycle
+  - reconnect delay cancelled by lifecycle
 - `dropped_messages`
-  - inbound: slow consumer `DROP_NEW`
-  - outbound: write buffer `DROP_NEW`
+  - inbound `DROP_NEW` and outbound `DROP_NEW`
 - `slow_consumer_events`
-  - inbound slow consumer with `ERROR` policy
+  - inbound overflow under `ERROR`
 - `write_buffer_overflow`
-  - outbound overflow with `ERROR` policy
+  - outbound overflow under `ERROR`
 - `ping_timeouts`
   - ping timeout events
 
-## Emitted observations
+## Observations
 
 - `ping_rtt_ms`
-  - round-trip time measured by `PingService`
+  - measured PING/PONG round-trip time
 
 ## Example
 
 ```php
-$collector = new YourMetricsCollector();
+$collector = new YourCollector();
 
-$clientConfig = new ClientConfiguration(
+$config = new ClientConfiguration(
     metricsCollector: $collector,
 );
 ```
-

@@ -1,20 +1,36 @@
-# Cluster Support (Iteration 1)
+# Cluster Discovery and Failover
 
-Cluster failover v1 is implemented with:
+## Seed Servers
 
-- seed servers from `ClientConfiguration::getServers()`
-- discovery from `INFO.connect_urls`
+Client can be configured with seed servers:
 
-Discovery updates the internal server pool with dedupe and round-robin order.
+```php
+new ClientConfiguration(
+    reconnectEnabled: true,
+    servers: [
+        new ServerAddress('n1', 4222),
+        new ServerAddress('n2', 4222),
+        new ServerAddress('n3', 4222),
+    ],
+);
+```
 
-- reconnect tries current node first.
-- node is marked dead only after confirmed `open()` failure.
-- after failure, reconnect switches to next available node from server pool.
-- dead node cooldown is controlled by `deadServerCooldownMs`.
-- discovered nodes from `INFO.connect_urls` join the pool and participate in next selections.
+## Discovery via `INFO.connect_urls`
 
-## Running Cluster Integration
+Incoming `INFO` frames may include `connect_urls`. Valid entries are converted to `ServerAddress` and added to the server pool with deduplication.
 
-- `make cluster-up`
-- `make integration-cluster`
-- `make cluster-down`
+## Failover Algorithm (v1)
+
+1. Reconnect attempts current server first.
+2. If `open(current)` fails, current is marked dead for `deadServerCooldownMs`.
+3. Next server is selected from pool round-robin, skipping dead entries.
+4. On successful open, that server becomes current.
+
+## Cooldown
+
+`deadServerCooldownMs` controls temporary exclusion of failed servers. After cooldown expiration, server can be selected again.
+
+## Limitations
+
+- Core NATS only (no JetStream workflow in reconnect logic).
+- At-least-once behavior during reconnect windows can produce duplicate publishes.

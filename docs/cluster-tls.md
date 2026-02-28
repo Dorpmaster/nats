@@ -1,37 +1,45 @@
-# Cluster TLS Failover
-
-Cluster TLS integration uses a 3-node NATS cluster (`n1`, `n2`, `n3`) with mutual TLS.
+# Cluster + TLS
 
 ## Requirements
 
-- seed hosts must match certificate hostnames (`n1`, `n2`, `n3`)
-- `verifyPeer` should be enabled
-- CA bundle must trust all node certificates
-- client certificate/key are required (`verify: true` on server)
+- Node hostnames in cluster config must match certificate names used for peer verification.
+- `verifyPeer=true` requires valid CA chain and hostname/SNI alignment.
+- For mTLS, server and client must trust the same CA and client certificate must be configured.
 
-## Client TLS Setup
+## Configuration
 
 ```php
-$tls = new TlsConfiguration(
-    enabled: true,
-    verifyPeer: true,
-    caFile: __DIR__ . '/tests/Support/tls/cluster/ca.pem',
-    clientCertFile: __DIR__ . '/tests/Support/tls/cluster/client.pem',
-    clientKeyFile: __DIR__ . '/tests/Support/tls/cluster/client-key.pem',
-    serverName: 'n1',
+$connection = new ConnectionConfiguration(
+    host: 'n1',
+    port: 4222,
+    tls: new TlsConfiguration(
+        enabled: true,
+        verifyPeer: true,
+        caFile: __DIR__ . '/certs/ca.pem',
+        clientCertFile: __DIR__ . '/certs/client.pem',
+        clientKeyFile: __DIR__ . '/certs/client-key.pem',
+    ),
+);
+
+$client = new ClientConfiguration(
+    reconnectEnabled: true,
+    servers: [
+        new ServerAddress('n1', 4222, true),
+        new ServerAddress('n2', 4222, true),
+        new ServerAddress('n3', 4222, true),
+    ],
 );
 ```
 
-## Semantics
+## Behavior
 
-- discovery still uses `INFO.connect_urls`
-- reconnect failover switches from dead node to next available node
-- subscriptions are restored after reconnect
-- with `bufferWhileReconnecting=true`, outbound queue can survive short reconnect windows
-- duplicate publishes are still possible during reconnect windows; handlers should remain idempotent
+- Discovery still works from `INFO.connect_urls`.
+- Reconnect/failover uses server pool with dead cooldown.
+- Resubscribe is performed after reconnect.
+- With `bufferWhileReconnecting=true`, outbound queue can survive short node outage.
 
-## Run
+## Typical Misconfigurations
 
-- `make cluster-tls-up`
-- `make integration-cluster-tls`
-- `make cluster-tls-down`
+- CN/SAN mismatch with target hostname.
+- Wrong CA file.
+- Static `serverName` pinned to a single node while failover targets different node names.

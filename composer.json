@@ -1,15 +1,20 @@
 {
     "name": "dorpmaster/nats",
     "type": "library",
-    "description": "Asynchronous client for NATS server.",
+    "description": "Production-grade asynchronous NATS client for PHP 8.5+ powered by AMPHP.",
     "keywords": [
-        "amp",
-        "amphp",
-        "async",
-        "client",
         "nats",
-        "revolt"
+        "async",
+        "amphp",
+        "messaging",
+        "cluster",
+        "tls"
     ],
+    "homepage": "https://github.com/Dorpmaster/nats",
+    "support": {
+        "issues": "https://github.com/Dorpmaster/nats/issues",
+        "source": "https://github.com/Dorpmaster/nats"
+    },
     "license": "MIT",
     "autoload": {
         "psr-4": {

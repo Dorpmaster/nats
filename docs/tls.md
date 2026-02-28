@@ -1,46 +1,40 @@
-# TLS Support
+# TLS
 
-TLS is opt-in and disabled by default.
+TLS is optional and disabled by default.
+
+## Basic TLS
 
 ```php
-use Dorpmaster\Nats\Connection\ConnectionConfiguration;
-use Dorpmaster\Nats\Domain\Connection\TlsConfiguration;
-
 $tls = new TlsConfiguration(
     enabled: true,
     verifyPeer: true,
     caFile: __DIR__ . '/certs/ca.pem',
-    serverName: 'nats.example.local',
+    serverName: 'nats.internal',
 );
 
-$connectionConfig = new ConnectionConfiguration(
-    host: 'nats.example.local',
+$connection = new ConnectionConfiguration(
+    host: 'nats.internal',
     port: 4223,
     tls: $tls,
 );
 ```
 
-## Supported options
+## Supported Options
 
-- `enabled` - enable TLS (`false` by default).
-- `verifyPeer` - verify remote certificate (`true` by default).
-- `caFile` / `caPath` - CA bundle location.
-- `clientCertFile` / `clientKeyFile` / `clientKeyPassphrase` - client certificate for mTLS.
-- `serverName` - SNI / hostname verification override.
-- `allowSelfSigned` - relaxed mode for local environments.
-- `minVersion` - minimum TLS version (`TLSv1.0`..`TLSv1.3`).
-- `alpnProtocols` - ALPN protocol list.
+- `enabled`
+- `verifyPeer`
+- `caFile`, `caPath`
+- `clientCertFile`, `clientKeyFile`, `clientKeyPassphrase` (mTLS)
+- `serverName` (SNI / peer-name override)
+- `allowSelfSigned`
+- `minVersion` (`TLSv1.0`..`TLSv1.3`)
+- `alpnProtocols`
 
-Connection dialing uses `tcp://host:port` with AMPHP `ClientTlsContext` when TLS is enabled.
+## Failure Model
 
-## Failure model
+TLS failures are wrapped into `ConnectionException` with message prefix `TLS handshake failed:`.
 
-TLS connection failures are wrapped into `ConnectionException` with message prefix:
+## Notes
 
-`TLS handshake failed: ...`
-
-## Integration testing
-
-TLS integration tests use a dedicated compose stack and test certificates:
-
-- `make integration-tls`
+- Keep `verifyPeer=true` in production.
+- Test certificates under `tests/Support/tls/` are for test environments only.
