@@ -118,6 +118,20 @@ $config = new ClientConfiguration(
 Details:
 
 - [docs/cluster.md](docs/cluster.md)
+- [docs/cluster-tls.md](docs/cluster-tls.md)
+
+Cluster + TLS example:
+
+```php
+$config = new ClientConfiguration(
+    reconnectEnabled: true,
+    servers: [
+        new ServerAddress('n1', 4222, true),
+        new ServerAddress('n2', 4222, true),
+        new ServerAddress('n3', 4222, true),
+    ],
+);
+```
 
 ## Metrics Hooks
 
@@ -151,4 +165,6 @@ Details:
 - Unit: `make phpunit`
 - Integration (real `nats-server`): `make integration`
 - Integration TLS: `make integration-tls`
+- Integration Cluster: `make integration-cluster`
+- Integration Cluster TLS: `make integration-cluster-tls`
 - Full suite: `make test`

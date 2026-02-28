@@ -59,6 +59,9 @@
         "integration:cluster": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/ClientClusterFailoverIntegrationTest.php"
         ],
+        "integration:cluster:tls": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/ClientClusterTlsFailoverIntegrationTest.php"
+        ],
         "test": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Full"
         ],

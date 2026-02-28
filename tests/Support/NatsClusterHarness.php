@@ -10,6 +10,12 @@ final class NatsClusterHarness
 
     public static function waitNodeReady(string $node, float $timeoutSeconds = 10.0, int $pollStepMilliseconds = 50): void
     {
+        if (self::isTlsClusterMode()) {
+            self::waitNodeAcceptsInfoTls($node, $timeoutSeconds, $pollStepMilliseconds);
+
+            return;
+        }
+
         self::waitNodeAcceptsInfo($node, $timeoutSeconds, $pollStepMilliseconds);
     }
 
@@ -48,6 +54,78 @@ final class NatsClusterHarness
             $port,
             $timeoutSeconds,
             $lastErr,
+        ));
+    }
+
+    public static function waitNodeAcceptsInfoTls(string $node, float $timeoutSeconds = 10.0, int $pollStepMilliseconds = 50): void
+    {
+        $host      = $node;
+        $port      = 4222;
+        $deadline  = microtime(true) + $timeoutSeconds;
+        $lastError = 'Unknown error';
+        $caFile    = (string) ($_SERVER['NATS_CLUSTER_TLS_CA'] ?? $_ENV['NATS_CLUSTER_TLS_CA'] ?? getenv('NATS_CLUSTER_TLS_CA') ?: '/app/tests/Support/tls/cluster/ca.pem');
+        $certFile  = (string) ($_SERVER['NATS_CLUSTER_TLS_CLIENT_CERT'] ?? $_ENV['NATS_CLUSTER_TLS_CLIENT_CERT'] ?? getenv('NATS_CLUSTER_TLS_CLIENT_CERT') ?: '/app/tests/Support/tls/cluster/client.pem');
+        $keyFile   = (string) ($_SERVER['NATS_CLUSTER_TLS_CLIENT_KEY'] ?? $_ENV['NATS_CLUSTER_TLS_CLIENT_KEY'] ?? getenv('NATS_CLUSTER_TLS_CLIENT_KEY') ?: '/app/tests/Support/tls/cluster/client-key.pem');
+
+        while (microtime(true) < $deadline) {
+            $context = stream_context_create([
+                'ssl' => [
+                    'verify_peer' => true,
+                    'verify_peer_name' => true,
+                    'peer_name' => $node,
+                    'cafile' => $caFile,
+                    'local_cert' => $certFile,
+                    'local_pk' => $keyFile,
+                    'SNI_enabled' => true,
+                    'capture_peer_cert' => false,
+                    'crypto_method' => STREAM_CRYPTO_METHOD_TLS_CLIENT,
+                ],
+            ]);
+
+            $errno  = 0;
+            $errstr = '';
+            $socket = @stream_socket_client(
+                sprintf('tcp://%s:%d', $host, $port),
+                $errno,
+                $errstr,
+                0.5,
+                STREAM_CLIENT_CONNECT,
+                $context,
+            );
+
+            if (is_resource($socket)) {
+                stream_set_timeout($socket, 0, 500_000);
+                $line = fgets($socket, 4096);
+                if (!is_string($line) || !str_starts_with($line, 'INFO ')) {
+                    fclose($socket);
+                    $lastError = sprintf('TCP connected, but INFO preface not received (line="%s")', trim((string) $line));
+                    usleep($pollStepMilliseconds * 1000);
+
+                    continue;
+                }
+
+                $tlsEnabled = @stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+                fclose($socket);
+
+                if ($tlsEnabled === true) {
+                    return;
+                }
+
+                $lastError = 'INFO preface received, but TLS upgrade failed';
+            } else {
+                $lastError = sprintf('[%d] %s', $errno, $errstr);
+            }
+
+            usleep($pollStepMilliseconds * 1000);
+        }
+
+        throw new \RuntimeException(sprintf(
+            'TLS cluster node %s did not accept INFO at %s:%d within %.1f seconds; last error: %s',
+            $node,
+            $host,
+            $port,
+            $timeoutSeconds,
+            $lastError,
         ));
     }
 
@@ -101,17 +179,30 @@ final class NatsClusterHarness
 
     private static function containerName(string $node): string
     {
-        $map = [
-            'n1' => (string) ($_SERVER['NATS_CLUSTER_N1_CONTAINER'] ?? $_ENV['NATS_CLUSTER_N1_CONTAINER'] ?? getenv('NATS_CLUSTER_N1_CONTAINER') ?: 'nats-cluster-it-n1-1'),
-            'n2' => (string) ($_SERVER['NATS_CLUSTER_N2_CONTAINER'] ?? $_ENV['NATS_CLUSTER_N2_CONTAINER'] ?? getenv('NATS_CLUSTER_N2_CONTAINER') ?: 'nats-cluster-it-n2-1'),
-            'n3' => (string) ($_SERVER['NATS_CLUSTER_N3_CONTAINER'] ?? $_ENV['NATS_CLUSTER_N3_CONTAINER'] ?? getenv('NATS_CLUSTER_N3_CONTAINER') ?: 'nats-cluster-it-n3-1'),
-        ];
+        if (self::isTlsClusterMode()) {
+            $map = [
+                'n1' => (string) ($_SERVER['NATS_CLUSTER_TLS_N1_CONTAINER'] ?? $_ENV['NATS_CLUSTER_TLS_N1_CONTAINER'] ?? getenv('NATS_CLUSTER_TLS_N1_CONTAINER') ?: 'nats-cluster-tls-it-n1-1'),
+                'n2' => (string) ($_SERVER['NATS_CLUSTER_TLS_N2_CONTAINER'] ?? $_ENV['NATS_CLUSTER_TLS_N2_CONTAINER'] ?? getenv('NATS_CLUSTER_TLS_N2_CONTAINER') ?: 'nats-cluster-tls-it-n2-1'),
+                'n3' => (string) ($_SERVER['NATS_CLUSTER_TLS_N3_CONTAINER'] ?? $_ENV['NATS_CLUSTER_TLS_N3_CONTAINER'] ?? getenv('NATS_CLUSTER_TLS_N3_CONTAINER') ?: 'nats-cluster-tls-it-n3-1'),
+            ];
+        } else {
+            $map = [
+                'n1' => (string) ($_SERVER['NATS_CLUSTER_N1_CONTAINER'] ?? $_ENV['NATS_CLUSTER_N1_CONTAINER'] ?? getenv('NATS_CLUSTER_N1_CONTAINER') ?: 'nats-cluster-it-n1-1'),
+                'n2' => (string) ($_SERVER['NATS_CLUSTER_N2_CONTAINER'] ?? $_ENV['NATS_CLUSTER_N2_CONTAINER'] ?? getenv('NATS_CLUSTER_N2_CONTAINER') ?: 'nats-cluster-it-n2-1'),
+                'n3' => (string) ($_SERVER['NATS_CLUSTER_N3_CONTAINER'] ?? $_ENV['NATS_CLUSTER_N3_CONTAINER'] ?? getenv('NATS_CLUSTER_N3_CONTAINER') ?: 'nats-cluster-it-n3-1'),
+            ];
+        }
 
         if (!isset($map[$node])) {
             throw new \InvalidArgumentException(sprintf('Unknown cluster node "%s"', $node));
         }
 
         return $map[$node];
+    }
+
+    private static function isTlsClusterMode(): bool
+    {
+        return (string) ($_SERVER['NATS_CLUSTER_TLS'] ?? $_ENV['NATS_CLUSTER_TLS'] ?? getenv('NATS_CLUSTER_TLS') ?: '0') === '1';
     }
 
     /** @param list<int> $expectedStatusCodes */

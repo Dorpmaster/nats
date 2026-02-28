@@ -16,12 +16,18 @@ NATS_TLS_NETWORK := nats-client-tls-test-network
 NATS_CLUSTER_COMPOSE_FILE := docker/compose.nats.cluster.test.yml
 NATS_CLUSTER_PROJECT := nats-cluster-it
 NATS_CLUSTER_NETWORK := nats-client-cluster-test-network
+NATS_CLUSTER_TLS_COMPOSE_FILE := docker/compose.nats.cluster.tls.test.yml
+NATS_CLUSTER_TLS_PROJECT := nats-cluster-tls-it
+NATS_CLUSTER_TLS_NETWORK := nats-client-cluster-tls-test-network
 DOCKER_SOCKET_HOST := $(shell if [ -S /var/run/docker.sock ]; then echo /var/run/docker.sock; elif [ -S $$HOME/.docker/run/docker.sock ]; then echo $$HOME/.docker/run/docker.sock; fi)
 NATS_CONTAINER := $(NATS_PROJECT)-nats-1
 NATS_TLS_CONTAINER := $(NATS_TLS_PROJECT)-nats-1
 NATS_CLUSTER_N1_CONTAINER := $(NATS_CLUSTER_PROJECT)-n1-1
 NATS_CLUSTER_N2_CONTAINER := $(NATS_CLUSTER_PROJECT)-n2-1
 NATS_CLUSTER_N3_CONTAINER := $(NATS_CLUSTER_PROJECT)-n3-1
+NATS_CLUSTER_TLS_N1_CONTAINER := $(NATS_CLUSTER_TLS_PROJECT)-n1-1
+NATS_CLUSTER_TLS_N2_CONTAINER := $(NATS_CLUSTER_TLS_PROJECT)-n2-1
+NATS_CLUSTER_TLS_N3_CONTAINER := $(NATS_CLUSTER_TLS_PROJECT)-n3-1
 # ...and turn them into do-nothing targets
 $(eval $(RUN_ARGS):;@:)
 
@@ -85,6 +91,20 @@ cluster-down:
 	docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans
 	if docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
 		docker network rm $(NATS_CLUSTER_NETWORK) || true; \
+	fi
+
+.PHONY: cluster-tls-up
+cluster-tls-up:
+	if ! docker network inspect $(NATS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_CLUSTER_TLS_NETWORK); \
+	fi
+	docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans
+
+.PHONY: cluster-tls-down
+cluster-tls-down:
+	docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans
+	if docker network inspect $(NATS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network rm $(NATS_CLUSTER_TLS_NETWORK) || true; \
 	fi
 
 .PHONY: nats-restart
@@ -194,6 +214,31 @@ integration-cluster: build
 		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
 		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
 		nats-client composer integration:cluster
+
+.PHONY: integration-cluster-tls
+integration-cluster-tls: build
+	set -e
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
+	trap 'docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_CLUSTER_TLS_NETWORK) || true; fi' EXIT
+	if ! docker network inspect $(NATS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_CLUSTER_TLS_NETWORK); \
+	fi
+	docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans
+	docker run --rm --interactive \
+		--user root \
+		--network=$(NATS_CLUSTER_TLS_NETWORK) \
+		--env NATS_CLUSTER_TLS=1 \
+		--env NATS_HOST=n1 \
+		--env NATS_PORT=4222 \
+		--env NATS_CLUSTER_TLS_N1_CONTAINER=$(NATS_CLUSTER_TLS_N1_CONTAINER) \
+		--env NATS_CLUSTER_TLS_N2_CONTAINER=$(NATS_CLUSTER_TLS_N2_CONTAINER) \
+		--env NATS_CLUSTER_TLS_N3_CONTAINER=$(NATS_CLUSTER_TLS_N3_CONTAINER) \
+		--env NATS_CLUSTER_TLS_CA=/app/tests/Support/tls/cluster/ca.pem \
+		--env NATS_CLUSTER_TLS_CLIENT_CERT=/app/tests/Support/tls/cluster/client.pem \
+		--env NATS_CLUSTER_TLS_CLIENT_KEY=/app/tests/Support/tls/cluster/client-key.pem \
+		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
+		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
+		nats-client composer integration:cluster:tls
 
 .PHONY: phpcs
 phpcs: build
