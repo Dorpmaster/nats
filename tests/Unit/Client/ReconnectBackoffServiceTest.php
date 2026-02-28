@@ -8,8 +8,10 @@ use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\ReconnectBackoffService;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectDelayHelperInterface;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
+#[CoversClass(ReconnectBackoffService::class)]
 final class ReconnectBackoffServiceTest extends TestCase
 {
     public function testWaitUsesDelayHelperAndDelayStrategy(): void
@@ -24,7 +26,7 @@ final class ReconnectBackoffServiceTest extends TestCase
         $delay = self::createMock(DelayStrategyInterface::class);
         $delay->expects(self::once())
             ->method('delay')
-            ->with(250);
+            ->with(250, null);
 
         $service = new ReconnectBackoffService($delay, $helper);
         $config  = new ClientConfiguration(

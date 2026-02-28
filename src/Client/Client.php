@@ -7,6 +7,7 @@ namespace Dorpmaster\Nats\Client;
 use Amp\Cancellation;
 use Amp\CancelledException;
 use Amp\CompositeCancellation;
+use Amp\DeferredCancellation;
 use Amp\DeferredFuture;
 use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
@@ -48,7 +49,8 @@ final class Client implements ClientInterface
     private ClientState $status;
 
     // A signal indicating that there are messages being processed.
-    private DeferredFuture|null $deferredDispatching = null;
+    private DeferredFuture|null $deferredDispatching                = null;
+    private DeferredCancellation|null $reconnectBackoffCancellation = null;
     /** @var array<string, string> */
     private array $subscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
@@ -582,9 +584,15 @@ final class Client implements ClientInterface
     private function waitReconnectBackoff(int $attempt): void
     {
         try {
-            $this->reconnectBackoffService->wait($attempt, $this->configuration);
+            $this->reconnectBackoffService->wait(
+                $attempt,
+                $this->configuration,
+                $this->reconnectBackoffCancellation?->getCancellation(),
+            );
         } catch (CancelledException) {
-            $this->transitionTo(ClientState::CLOSED, 'reconnect delay cancelled');
+            if ($this->status === ClientState::RECONNECTING) {
+                $this->transitionTo(ClientState::CLOSED, 'reconnect delay cancelled');
+            }
         }
     }
 
@@ -637,6 +645,14 @@ final class Client implements ClientInterface
 
         if ($targetState === ClientState::CONNECTED) {
             $this->writeBuffer->start($this->connection);
+        }
+
+        if ($targetState === ClientState::RECONNECTING) {
+            $this->reconnectBackoffCancellation?->cancel();
+            $this->reconnectBackoffCancellation = new DeferredCancellation();
+        } elseif ($previous === ClientState::RECONNECTING) {
+            $this->reconnectBackoffCancellation?->cancel();
+            $this->reconnectBackoffCancellation = null;
         }
 
         if (in_array($targetState, [ClientState::RECONNECTING, ClientState::CLOSED], true)) {

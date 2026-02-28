@@ -15,6 +15,7 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use Dorpmaster\Nats\Tests\Support\BlockingDelayStrategy;
 use Dorpmaster\Nats\Tests\Support\RecordingDelayStrategy;
 use PHPUnit\Framework\TestCase;
 
@@ -335,6 +336,72 @@ final class ClientReconnectTest extends TestCase
             // Assert
             self::assertSame(3, $openCalls);
             self::assertSame([7, 11], $delayStrategy->delays());
+        });
+    }
+
+    public function testDisconnectCancelsReconnectBackoffPromptly(): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function () {
+            // Arrange
+            $openCalls     = 0;
+            $reads         = 0;
+            $delayStrategy = new BlockingDelayStrategy();
+
+            $connection = self::createStub(ConnectionInterface::class);
+            $connection->method('open')
+                ->willReturnCallback(static function () use (&$openCalls): void {
+                    $openCalls++;
+                    if ($openCalls > 1) {
+                        throw new \RuntimeException('reconnect failed');
+                    }
+                });
+            $connection->method('close');
+            $connection->method('isClosed')->willReturn(false);
+            $connection->method('receive')
+                ->willReturnCallback(static function () use (&$reads): PingMessage {
+                    $reads++;
+                    if ($reads === 1) {
+                        throw new \RuntimeException('read failed');
+                    }
+
+                    return new PingMessage();
+                });
+            $connection->method('send');
+
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
+            $messageDispatcher->method('dispatch')->willReturn(null);
+
+            $storage = self::createStub(SubscriptionStorageInterface::class);
+            $storage->method('all')->willReturn([]);
+
+            $client = new Client(
+                configuration: new ClientConfiguration(
+                    reconnectEnabled: true,
+                    maxReconnectAttempts: null,
+                    reconnectBackoffInitialMs: 10,
+                    reconnectBackoffMaxMs: 10,
+                    reconnectBackoffMultiplier: 1.0,
+                    reconnectJitterFraction: 0.0,
+                ),
+                cancellation: new NullCancellation(),
+                connection: $connection,
+                eventDispatcher: new EventDispatcher(),
+                messageDispatcher: $messageDispatcher,
+                storage: $storage,
+                logger: $this->logger,
+                delayStrategy: $delayStrategy,
+            );
+
+            // Act
+            $client->connect();
+            $this->forceTick();
+            $client->disconnect();
+            $this->forceTick();
+
+            // Assert
+            self::assertSame(2, $openCalls);
+            self::assertSame([10], $delayStrategy->delays());
         });
     }
 }

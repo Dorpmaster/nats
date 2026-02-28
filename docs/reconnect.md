@@ -34,6 +34,7 @@ Reconnect is triggered when the active connection drops due to:
 - Reconnect delays are delegated to `DelayStrategyInterface`:
   - default: `EventLoopDelayStrategy`
   - tests: `ImmediateDelayStrategy` / `RecordingDelayStrategy`
+  - strategy receives optional `Cancellation`; `close()` / `drain()` cancel active backoff immediately
 - Reconnect does not create additional receive loops: one loop remains active.
 - Existing subscriptions are restored automatically after reconnect handshake (after `INFO`).
 

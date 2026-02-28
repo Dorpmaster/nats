@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Client;
 
+use Amp\Cancellation;
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectBackoffServiceInterface;
@@ -20,8 +21,12 @@ final readonly class ReconnectBackoffService implements ReconnectBackoffServiceI
     /**
      * @throws \Amp\CancelledException
      */
-    public function wait(int $attempt, ClientConfigurationInterface $configuration): void
-    {
+    public function wait(
+        int $attempt,
+        ClientConfigurationInterface $configuration,
+        Cancellation|null $cancellation = null,
+    ): void {
+
         $delayMs = $this->reconnectDelayHelper->calculateDelayMs(
             $attempt,
             $configuration->getReconnectBackoffInitialMs(),
@@ -30,6 +35,6 @@ final readonly class ReconnectBackoffService implements ReconnectBackoffServiceI
             $configuration->getReconnectJitterFraction(),
         );
 
-        $this->delayStrategy->delay($delayMs);
+        $this->delayStrategy->delay($delayMs, $cancellation);
     }
 }
