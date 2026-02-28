@@ -11,6 +11,7 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Protocol\OutboundFrameBuilder;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
+use Dorpmaster\Nats\Tests\Support\RecordingMetricsCollector;
 use PHPUnit\Framework\TestCase;
 
 final class WriteBufferServiceTest extends TestCase
@@ -45,7 +46,8 @@ final class WriteBufferServiceTest extends TestCase
     public function testOverflowMessagesThrowsForErrorPolicy(): void
     {
         // Arrange
-        $service = new WriteBufferService(1, 10_000, WriteBufferPolicy::ERROR);
+        $metrics = new RecordingMetricsCollector();
+        $service = new WriteBufferService(1, 10_000, WriteBufferPolicy::ERROR, metricsCollector: $metrics);
         $frame   = (new OutboundFrameBuilder())->build(new PubMessage('s', 'payload'));
 
         // Act
@@ -55,7 +57,11 @@ final class WriteBufferServiceTest extends TestCase
         self::expectException(WriteBufferOverflowException::class);
 
         // Act
-        $service->enqueue($frame);
+        try {
+            $service->enqueue($frame);
+        } finally {
+            self::assertSame(1, $metrics->countIncrements('write_buffer_overflow'));
+        }
     }
 
     public function testOverflowBytesThrowsForErrorPolicy(): void
@@ -74,7 +80,8 @@ final class WriteBufferServiceTest extends TestCase
     public function testDropNewDoesNotIncreasePendingCounters(): void
     {
         // Arrange
-        $service = new WriteBufferService(1, 10_000, WriteBufferPolicy::DROP_NEW);
+        $metrics = new RecordingMetricsCollector();
+        $service = new WriteBufferService(1, 10_000, WriteBufferPolicy::DROP_NEW, metricsCollector: $metrics);
         $frame   = (new OutboundFrameBuilder())->build(new PubMessage('s', 'payload'));
 
         // Act
@@ -84,6 +91,7 @@ final class WriteBufferServiceTest extends TestCase
         // Assert
         self::assertFalse($isQueued);
         self::assertSame(1, $service->getPendingMessages());
+        self::assertSame(1, $metrics->countIncrements('dropped_messages'));
     }
 
     public function testFailedItemWrittenAfterReconnectWithoutDoubleCountAndSentFirst(): void

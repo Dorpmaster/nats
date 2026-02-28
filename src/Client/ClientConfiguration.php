@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Client;
 
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
+use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
+use Dorpmaster\Nats\Domain\Telemetry\NullMetricsCollector;
+use Dorpmaster\Nats\Domain\Telemetry\TimeProviderInterface;
+use Dorpmaster\Nats\Telemetry\MonotonicTimeProvider;
 
 final readonly class ClientConfiguration implements ClientConfigurationInterface
 {
@@ -21,6 +25,12 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
         private int $maxWriteBufferBytes = 5_000_000,
         private WriteBufferPolicy $writeBufferPolicy = WriteBufferPolicy::ERROR,
         private bool $bufferWhileReconnecting = false,
+        private MetricsCollectorInterface|null $metricsCollector = null,
+        private bool $pingEnabled = false,
+        private int $pingIntervalMs = 30_000,
+        private int $pingTimeoutMs = 2_000,
+        private bool $pingReconnectOnTimeout = true,
+        private TimeProviderInterface|null $timeProvider = null,
     ) {
     }
 
@@ -83,5 +93,35 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
     public function isBufferWhileReconnecting(): bool
     {
         return $this->bufferWhileReconnecting;
+    }
+
+    public function getMetricsCollector(): MetricsCollectorInterface
+    {
+        return $this->metricsCollector ?? new NullMetricsCollector();
+    }
+
+    public function isPingEnabled(): bool
+    {
+        return $this->pingEnabled;
+    }
+
+    public function getPingIntervalMs(): int
+    {
+        return $this->pingIntervalMs;
+    }
+
+    public function getPingTimeoutMs(): int
+    {
+        return $this->pingTimeoutMs;
+    }
+
+    public function isPingReconnectOnTimeout(): bool
+    {
+        return $this->pingReconnectOnTimeout;
+    }
+
+    public function getTimeProvider(): TimeProviderInterface
+    {
+        return $this->timeProvider ?? new MonotonicTimeProvider();
     }
 }

@@ -14,6 +14,8 @@ use Dorpmaster\Nats\Client\WriteBuffer\OutboundFrame;
 use Dorpmaster\Nats\Domain\Client\WriteBufferInterface;
 use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
+use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
+use Dorpmaster\Nats\Domain\Telemetry\NullMetricsCollector;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 
@@ -37,6 +39,7 @@ final class WriteBufferService implements WriteBufferInterface
         private readonly int $maxBytes,
         private readonly WriteBufferPolicy $policy = WriteBufferPolicy::ERROR,
         private readonly LoggerInterface|null $logger = null,
+        private readonly MetricsCollectorInterface|null $metricsCollector = null,
     ) {
         $this->initializeQueue();
     }
@@ -107,9 +110,16 @@ final class WriteBufferService implements WriteBufferInterface
             || ($this->pendingBytes + $frame->bytes) > $this->maxBytes
         ) {
             if ($this->policy === WriteBufferPolicy::DROP_NEW) {
+                $this->getMetricsCollector()->increment('dropped_messages', 1, [
+                    'direction' => 'outbound',
+                    'policy' => WriteBufferPolicy::DROP_NEW->name,
+                ]);
                 return false;
             }
 
+            $this->getMetricsCollector()->increment('write_buffer_overflow', 1, [
+                'policy' => WriteBufferPolicy::ERROR->name,
+            ]);
             throw new WriteBufferOverflowException(sprintf(
                 'Write buffer overflow: pending_messages=%d max_messages=%d pending_bytes=%d max_bytes=%d',
                 $this->pendingMessages,
@@ -226,5 +236,10 @@ final class WriteBufferService implements WriteBufferInterface
         $this->queue            = new Queue($this->maxMessages);
         $this->iterator         = $this->queue->iterate();
         $this->loopCancellation = new DeferredCancellation();
+    }
+
+    private function getMetricsCollector(): MetricsCollectorInterface
+    {
+        return $this->metricsCollector ?? new NullMetricsCollector();
     }
 }

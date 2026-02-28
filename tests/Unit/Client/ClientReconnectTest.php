@@ -19,6 +19,7 @@ use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
 use Dorpmaster\Nats\Tests\Support\BlockingDelayStrategy;
 use Dorpmaster\Nats\Tests\Support\RecordingDelayStrategy;
+use Dorpmaster\Nats\Tests\Support\RecordingMetricsCollector;
 use PHPUnit\Framework\TestCase;
 
 final class ClientReconnectTest extends TestCase
@@ -68,9 +69,11 @@ final class ClientReconnectTest extends TestCase
 
             $storage = self::createStub(SubscriptionStorageInterface::class);
             $storage->method('all')->willReturn([]);
+            $metrics = new RecordingMetricsCollector();
 
             $client = new Client(
                 configuration: new ClientConfiguration(
+                    metricsCollector: $metrics,
                     reconnectEnabled: true,
                     maxReconnectAttempts: 1,
                     reconnectJitterFraction: 0.0,
@@ -90,6 +93,7 @@ final class ClientReconnectTest extends TestCase
 
             // Assert
             self::assertGreaterThanOrEqual(2, $openCalls);
+            self::assertSame(1, $metrics->countIncrements('reconnect_count'));
         });
     }
 

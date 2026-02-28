@@ -16,6 +16,7 @@ use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
 use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
+use Dorpmaster\Nats\Domain\Client\PingServiceInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectBackoffServiceInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectDelayHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
@@ -25,6 +26,7 @@ use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
+use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
@@ -33,6 +35,7 @@ use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
 use Dorpmaster\Nats\Protocol\HPubMessage;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
 use Dorpmaster\Nats\Protocol\OutboundFrameBuilder;
+use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Protocol\SubMessage;
 use Dorpmaster\Nats\Protocol\UnSubMessage;
@@ -59,6 +62,8 @@ final class Client implements ClientInterface
     private readonly ReconnectBackoffServiceInterface $reconnectBackoffService;
     private readonly WriteBufferInterface $writeBuffer;
     private readonly OutboundFrameBuilder $outboundFrameBuilder;
+    private readonly MetricsCollectorInterface $metricsCollector;
+    private readonly PingServiceInterface $pingService;
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
@@ -74,8 +79,10 @@ final class Client implements ClientInterface
         ReconnectBackoffServiceInterface|null $reconnectBackoffService = null,
         WriteBufferInterface|null $writeBuffer = null,
         OutboundFrameBuilder|null $outboundFrameBuilder = null,
+        PingServiceInterface|null $pingService = null,
     ) {
         $this->status                  = ClientState::NEW;
+        $this->metricsCollector        = $this->configuration->getMetricsCollector();
         $this->subscriptionIdHelper    = $subscriptionIdHelper ?? new SubscriptionIdHelper();
         $this->reconnectBackoffService = $reconnectBackoffService
             ?? new ReconnectBackoffService(
@@ -87,6 +94,7 @@ final class Client implements ClientInterface
             $this->configuration->getMaxWriteBufferBytes(),
             $this->configuration->getWriteBufferPolicy(),
             $this->logger,
+            $this->metricsCollector,
         );
         $this->writeBuffer->setFailureHandler(function (Throwable $exception): void {
             if ($this->status === ClientState::CONNECTED) {
@@ -94,6 +102,13 @@ final class Client implements ClientInterface
             }
         });
         $this->outboundFrameBuilder = $outboundFrameBuilder ?? new OutboundFrameBuilder();
+        $this->pingService          = $pingService ?? new PingService(
+            $this->delayStrategy ?? new EventLoopDelayStrategy(),
+            $this->configuration->getPingIntervalMs(),
+            $this->configuration->getPingTimeoutMs(),
+            $this->metricsCollector,
+            $this->configuration->getTimeProvider(),
+        );
     }
 
     public function connect(): void
@@ -196,6 +211,10 @@ final class Client implements ClientInterface
                     }
 
                     continue;
+                }
+
+                if ($message->getType() === NatsMessageType::PONG) {
+                    $this->pingService->onPongReceived();
                 }
 
                 try {
@@ -595,6 +614,9 @@ final class Client implements ClientInterface
                 $this->reconnectBackoffCancellation?->getCancellation(),
             );
         } catch (CancelledException) {
+            $this->metricsCollector->increment('reconnect_backoff_cancelled', 1, [
+                'reason' => 'lifecycle',
+            ]);
             if ($this->isReconnectBackoffContextActive($epoch)) {
                 $this->logger?->debug('Reconnect backoff cancelled while reconnect context is still active');
             }
@@ -654,6 +676,30 @@ final class Client implements ClientInterface
 
         if ($targetState === ClientState::CONNECTED) {
             $this->writeBuffer->start($this->connection);
+            if ($previous === ClientState::RECONNECTING) {
+                $this->metricsCollector->increment('reconnect_count', 1);
+            }
+            if ($this->configuration->isPingEnabled()) {
+                $this->pingService->start(
+                    function (): void {
+                        try {
+                            $this->enqueueOutbound(new PingMessage(), true);
+                        } catch (Throwable) {
+                            // Ignore ping enqueue failures. Reconnect path is handled by regular state checks.
+                        }
+                    },
+                    function (): void {
+                        if (
+                            $this->configuration->isPingReconnectOnTimeout()
+                            && $this->status === ClientState::CONNECTED
+                        ) {
+                            $this->tryReconnect(new ConnectionException('Ping timeout'));
+                        }
+                    },
+                );
+            }
+        } elseif ($previous === ClientState::CONNECTED) {
+            $this->pingService->stop();
         }
 
         if ($targetState === ClientState::RECONNECTING) {

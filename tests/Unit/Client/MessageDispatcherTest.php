@@ -20,6 +20,7 @@ use Dorpmaster\Nats\Protocol\OkMessage;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Protocol\PongMessage;
 use Dorpmaster\Nats\Protocol\PubMessage;
+use Dorpmaster\Nats\Tests\Support\RecordingMetricsCollector;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -246,6 +247,7 @@ final class MessageDispatcherTest extends TestCase
         // Arrange
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $storage     = self::createStub(SubscriptionStorageInterface::class);
+        $metrics     = new RecordingMetricsCollector();
 
         $dispatcher = null;
         $storage->method('get')
@@ -264,14 +266,18 @@ final class MessageDispatcherTest extends TestCase
             null,
             maxPendingMessagesPerSubscription: 1,
             slowConsumerPolicy: SlowConsumerPolicy::ERROR,
+            metricsCollector: $metrics,
         );
 
-        // Assert
-        self::expectException(SlowConsumerException::class);
-        self::expectExceptionMessage('Slow consumer detected for sid "sid"');
-
         // Act
-        $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload'));
+        try {
+            $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload'));
+            self::fail('Expected SlowConsumerException');
+        } catch (SlowConsumerException $exception) {
+            // Assert
+            self::assertStringContainsString('Slow consumer detected for sid "sid"', $exception->getMessage());
+            self::assertSame(1, $metrics->countIncrements('slow_consumer_events'));
+        }
     }
 
     public function testDropNewPolicyDropsOverflowAndKeepsDispatcherWorking(): void
@@ -280,6 +286,7 @@ final class MessageDispatcherTest extends TestCase
         $connectInfo = new ConnectInfo(false, false, false, 'php', '8.3');
         $storage     = self::createStub(SubscriptionStorageInterface::class);
         $calls       = 0;
+        $metrics     = new RecordingMetricsCollector();
 
         $dispatcher = null;
         $storage->method('get')
@@ -299,6 +306,7 @@ final class MessageDispatcherTest extends TestCase
             null,
             maxPendingMessagesPerSubscription: 1,
             slowConsumerPolicy: SlowConsumerPolicy::DROP_NEW,
+            metricsCollector: $metrics,
         );
 
         // Act
@@ -309,6 +317,7 @@ final class MessageDispatcherTest extends TestCase
         self::assertNull($response1);
         self::assertNull($response2);
         self::assertSame(2, $calls);
+        self::assertSame(1, $metrics->countIncrements('dropped_messages'));
     }
 
     public function testPendingBytesExceedTriggersErrorPolicy(): void

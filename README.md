@@ -70,6 +70,33 @@ $clientConfig = new ClientConfiguration(
 
 Runtime model: `Client` delegates outbound queueing/sending to `WriteBufferService` (queue + writer-loop + drain).
 
+## Metrics Hooks
+
+```php
+$clientConfig = new ClientConfiguration(
+    metricsCollector: $collector,
+);
+```
+
+Details:
+
+- [docs/metrics.md](docs/metrics.md)
+
+## Health / Ping RTT
+
+```php
+$clientConfig = new ClientConfiguration(
+    pingEnabled: true,
+    pingIntervalMs: 30_000,
+    pingTimeoutMs: 2_000,
+    pingReconnectOnTimeout: true,
+);
+```
+
+Details:
+
+- [docs/health.md](docs/health.md)
+
 ## Testing
 
 - Unit: `make phpunit`

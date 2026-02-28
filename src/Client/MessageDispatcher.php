@@ -7,6 +7,8 @@ namespace Dorpmaster\Nats\Client;
 use Dorpmaster\Nats\Domain\Client\SlowConsumerException;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
+use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
+use Dorpmaster\Nats\Domain\Telemetry\NullMetricsCollector;
 use Dorpmaster\Nats\Protocol\ConnectMessage;
 use Dorpmaster\Nats\Protocol\Contracts\ConnectMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
@@ -36,6 +38,7 @@ final class MessageDispatcher implements MessageDispatcherInterface
         private readonly int $maxPendingMessagesPerSubscription = 1000,
         private readonly SlowConsumerPolicy $slowConsumerPolicy = SlowConsumerPolicy::ERROR,
         private readonly int|null $maxPendingBytesPerSubscription = 2_000_000,
+        private readonly MetricsCollectorInterface|null $metricsCollector = null,
     ) {
     }
 
@@ -140,6 +143,10 @@ final class MessageDispatcher implements MessageDispatcherInterface
         if ($isMessagesOverflow || $isBytesOverflow) {
             $policy = $this->slowConsumerPolicy;
             if ($policy === SlowConsumerPolicy::DROP_NEW) {
+                $this->getMetricsCollector()->increment('dropped_messages', 1, [
+                    'direction' => 'inbound',
+                    'policy' => SlowConsumerPolicy::DROP_NEW->name,
+                ]);
                 $this->logger?->warning('Dropping message due to slow consumer (DROP_NEW policy)', [
                     'sid' => $sid,
                     'pending' => $pendingMessages,
@@ -151,6 +158,10 @@ final class MessageDispatcher implements MessageDispatcherInterface
                 return false;
             }
 
+            $this->getMetricsCollector()->increment('slow_consumer_events', 1, [
+                'direction' => 'inbound',
+                'policy' => SlowConsumerPolicy::ERROR->name,
+            ]);
             throw new SlowConsumerException(sprintf(
                 'Slow consumer detected for sid "%s": pending=%d max=%d pending_bytes=%d max_bytes=%s',
                 $sid,
@@ -201,5 +212,10 @@ final class MessageDispatcher implements MessageDispatcherInterface
         ]);
 
         return null;
+    }
+
+    private function getMetricsCollector(): MetricsCollectorInterface
+    {
+        return $this->metricsCollector ?? new NullMetricsCollector();
     }
 }
