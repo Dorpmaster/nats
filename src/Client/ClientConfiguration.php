@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Client;
 
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
+use Dorpmaster\Nats\Domain\Connection\ServerAddress;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
 use Dorpmaster\Nats\Domain\Telemetry\NullMetricsCollector;
 use Dorpmaster\Nats\Domain\Telemetry\TimeProviderInterface;
@@ -21,6 +22,7 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
         private float $reconnectBackoffMultiplier = 2.0,
         private float $reconnectJitterFraction = 0.2,
         private array $reconnectServers = [],
+        private array $servers = [],
         private int $maxWriteBufferMessages = 10_000,
         private int $maxWriteBufferBytes = 5_000_000,
         private WriteBufferPolicy $writeBufferPolicy = WriteBufferPolicy::ERROR,
@@ -73,6 +75,12 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
     public function getReconnectServers(): array
     {
         return $this->reconnectServers;
+    }
+
+    /** @return list<ServerAddress> */
+    public function getServers(): array
+    {
+        return $this->servers;
     }
 
     public function getMaxWriteBufferMessages(): int

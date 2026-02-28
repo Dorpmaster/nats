@@ -91,6 +91,19 @@ Details:
 
 - [docs/tls.md](docs/tls.md)
 
+## Cluster
+
+Cluster discovery groundwork is available:
+
+- seed servers can be configured in `ClientConfiguration`
+- `INFO.connect_urls` can be discovered and added to an internal server pool
+
+Failover switching is planned in the next iteration.
+
+Details:
+
+- [docs/cluster.md](docs/cluster.md)
+
 ## Metrics Hooks
 
 ```php

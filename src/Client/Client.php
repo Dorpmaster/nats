@@ -25,10 +25,15 @@ use Dorpmaster\Nats\Domain\Client\WriteBufferInterface;
 use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
+use Dorpmaster\Nats\Domain\Connection\ServerAddress;
+use Dorpmaster\Nats\Domain\Connection\ServerPoolInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
+use Dorpmaster\Nats\Connection\ServerPoolService;
+use Dorpmaster\Nats\Client\Cluster\InfoConnectUrlsExtractor;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\InfoMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
@@ -64,6 +69,8 @@ final class Client implements ClientInterface
     private readonly OutboundFrameBuilder $outboundFrameBuilder;
     private readonly MetricsCollectorInterface $metricsCollector;
     private readonly PingServiceInterface $pingService;
+    private readonly ServerPoolInterface $serverPool;
+    private readonly InfoConnectUrlsExtractor $infoConnectUrlsExtractor;
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
@@ -80,6 +87,8 @@ final class Client implements ClientInterface
         WriteBufferInterface|null $writeBuffer = null,
         OutboundFrameBuilder|null $outboundFrameBuilder = null,
         PingServiceInterface|null $pingService = null,
+        ServerPoolInterface|null $serverPool = null,
+        InfoConnectUrlsExtractor|null $infoConnectUrlsExtractor = null,
     ) {
         $this->status                  = ClientState::NEW;
         $this->metricsCollector        = $this->configuration->getMetricsCollector();
@@ -101,14 +110,21 @@ final class Client implements ClientInterface
                 $this->tryReconnect($exception);
             }
         });
-        $this->outboundFrameBuilder = $outboundFrameBuilder ?? new OutboundFrameBuilder();
-        $this->pingService          = $pingService ?? new PingService(
+        $this->outboundFrameBuilder     = $outboundFrameBuilder ?? new OutboundFrameBuilder();
+        $this->pingService              = $pingService ?? new PingService(
             $this->delayStrategy ?? new EventLoopDelayStrategy(),
             $this->configuration->getPingIntervalMs(),
             $this->configuration->getPingTimeoutMs(),
             $this->metricsCollector,
             $this->configuration->getTimeProvider(),
         );
+        $this->serverPool               = $serverPool ?? new ServerPoolService($this->configuration->getTimeProvider());
+        $this->infoConnectUrlsExtractor = $infoConnectUrlsExtractor ?? new InfoConnectUrlsExtractor();
+        $servers                        = $this->configuration->getServers();
+        if ($servers !== []) {
+            $this->serverPool->addServers($servers);
+            $this->serverPool->setCurrent($servers[0]);
+        }
     }
 
     public function connect(): void
@@ -215,6 +231,10 @@ final class Client implements ClientInterface
 
                 if ($message->getType() === NatsMessageType::PONG) {
                     $this->pingService->onPongReceived();
+                }
+
+                if ($message instanceof InfoMessageInterface) {
+                    $this->discoverServersFromInfo($message);
                 }
 
                 try {
@@ -766,8 +786,25 @@ final class Client implements ClientInterface
         return $this->status;
     }
 
+    /** @return list<ServerAddress> */
+    public function getKnownServers(): array
+    {
+        return $this->serverPool->allServers();
+    }
+
     private function isReconnectBackoffContextActive(int $epoch): bool
     {
         return $this->status === ClientState::RECONNECTING && $this->activeReconnectBackoffEpoch === $epoch;
+    }
+
+    private function discoverServersFromInfo(InfoMessageInterface $message): void
+    {
+        $tlsEnabled = $this->serverPool->getCurrent()?->isTlsEnabled() ?? false;
+        $servers    = $this->infoConnectUrlsExtractor->extract($message, $tlsEnabled);
+        if ($servers === []) {
+            return;
+        }
+
+        $this->serverPool->addDiscoveredServers($servers);
     }
 }

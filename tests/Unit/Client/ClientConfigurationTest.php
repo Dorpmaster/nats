@@ -6,6 +6,7 @@ namespace Dorpmaster\Nats\Tests\Unit\Client;
 
 use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\WriteBufferPolicy;
+use Dorpmaster\Nats\Domain\Connection\ServerAddress;
 use Dorpmaster\Nats\Tests\Support\FakeTimeProvider;
 use Dorpmaster\Nats\Tests\Support\RecordingMetricsCollector;
 use PHPUnit\Framework\TestCase;
@@ -26,6 +27,7 @@ final class ClientConfigurationTest extends TestCase
         self::assertSame(2.0, $configuration->getReconnectBackoffMultiplier());
         self::assertSame(0.2, $configuration->getReconnectJitterFraction());
         self::assertSame([], $configuration->getReconnectServers());
+        self::assertSame([], $configuration->getServers());
         self::assertSame(10_000, $configuration->getMaxWriteBufferMessages());
         self::assertSame(5_000_000, $configuration->getMaxWriteBufferBytes());
         self::assertSame(WriteBufferPolicy::ERROR, $configuration->getWriteBufferPolicy());
@@ -52,6 +54,7 @@ final class ClientConfigurationTest extends TestCase
             reconnectBackoffMultiplier: 1.5,
             reconnectJitterFraction: 0.0,
             reconnectServers: ['nats://127.0.0.1:4222'],
+            servers: [new ServerAddress('127.0.0.1', 4222)],
             maxWriteBufferMessages: 50,
             maxWriteBufferBytes: 123_456,
             writeBufferPolicy: WriteBufferPolicy::DROP_NEW,
@@ -71,6 +74,7 @@ final class ClientConfigurationTest extends TestCase
         self::assertSame(1.5, $configuration->getReconnectBackoffMultiplier());
         self::assertSame(0.0, $configuration->getReconnectJitterFraction());
         self::assertSame(['nats://127.0.0.1:4222'], $configuration->getReconnectServers());
+        self::assertEquals([new ServerAddress('127.0.0.1', 4222)], $configuration->getServers());
         self::assertSame(50, $configuration->getMaxWriteBufferMessages());
         self::assertSame(123_456, $configuration->getMaxWriteBufferBytes());
         self::assertSame(WriteBufferPolicy::DROP_NEW, $configuration->getWriteBufferPolicy());
