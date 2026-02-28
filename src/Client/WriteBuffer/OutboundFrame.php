@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Dorpmaster\Nats\Domain\Client;
+namespace Dorpmaster\Nats\Client\WriteBuffer;
 
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 

@@ -10,7 +10,7 @@ use Amp\DeferredFuture;
 use Amp\Pipeline\ConcurrentIterator;
 use Amp\Pipeline\Queue;
 use Amp\TimeoutCancellation;
-use Dorpmaster\Nats\Domain\Client\OutboundFrame;
+use Dorpmaster\Nats\Client\WriteBuffer\OutboundFrame;
 use Dorpmaster\Nats\Domain\Client\WriteBufferInterface;
 use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;

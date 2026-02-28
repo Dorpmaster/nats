@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Protocol;
 
-use Dorpmaster\Nats\Domain\Client\OutboundFrame;
+use Dorpmaster\Nats\Client\WriteBuffer\OutboundFrame;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 
 final class OutboundFrameBuilder
