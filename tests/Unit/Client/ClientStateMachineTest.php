@@ -7,6 +7,7 @@ namespace Dorpmaster\Nats\Tests\Unit\Client;
 use Amp\NullCancellation;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
+use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
@@ -26,7 +27,7 @@ final class ClientStateMachineTest extends TestCase
         $client = $this->createClientWithConnection(self::createStub(ConnectionInterface::class));
         $invoke = \Closure::bind(
             static function (Client $target): void {
-                $target->transitionTo('RECONNECTING');
+                $target->transitionTo(ClientState::RECONNECTING);
             },
             null,
             Client::class,
@@ -58,7 +59,7 @@ final class ClientStateMachineTest extends TestCase
             $client->connect();
 
             // Assert
-            self::assertSame('CONNECTED', $client->getState());
+            self::assertSame(ClientState::CONNECTED, $client->getState());
 
             $client->disconnect();
         });
@@ -121,8 +122,8 @@ final class ClientStateMachineTest extends TestCase
             $client->disconnect();
 
             // Assert
-            self::assertContains('RECONNECTING', $events);
-            self::assertContains('CONNECTED', $events);
+            self::assertContains(ClientState::RECONNECTING, $events);
+            self::assertContains(ClientState::CONNECTED, $events);
         });
     }
 
@@ -150,7 +151,7 @@ final class ClientStateMachineTest extends TestCase
             $client->disconnect();
 
             // Assert
-            self::assertSame('CLOSED', $client->getState());
+            self::assertSame(ClientState::CLOSED, $client->getState());
             self::assertGreaterThanOrEqual(1, $closeCalls);
         });
     }
@@ -176,7 +177,7 @@ final class ClientStateMachineTest extends TestCase
             $client    = $this->createClientWithConnection($connection, $dispatcher);
             $setStatus = \Closure::bind(
                 static function (Client $target): void {
-                    $target->status = 'CONNECTED';
+                    $target->status = ClientState::CONNECTED;
                 },
                 null,
                 Client::class,
@@ -188,9 +189,9 @@ final class ClientStateMachineTest extends TestCase
             $this->forceTick();
 
             // Assert
-            self::assertSame('CLOSED', $client->getState());
-            self::assertContains('DRAINING', $events);
-            self::assertContains('CLOSED', $events);
+            self::assertSame(ClientState::CLOSED, $client->getState());
+            self::assertContains(ClientState::DRAINING, $events);
+            self::assertContains(ClientState::CLOSED, $events);
         });
     }
 
@@ -211,7 +212,7 @@ final class ClientStateMachineTest extends TestCase
 
             $setStatus = \Closure::bind(
                 static function (Client $target): void {
-                    $target->status = 'DRAINING';
+                    $target->status = ClientState::DRAINING;
                 },
                 null,
                 Client::class,

@@ -2,12 +2,23 @@
 
 ## States
 
+Client lifecycle state is represented by [`ClientState` enum](../src/Domain/Client/ClientState.php).
+
 - `NEW`
 - `CONNECTING`
 - `CONNECTED`
 - `RECONNECTING`
 - `DRAINING`
 - `CLOSED`
+
+## Allowed Transitions
+
+- `NEW -> CONNECTING|CLOSED`
+- `CONNECTING -> CONNECTED|RECONNECTING|DRAINING|CLOSED`
+- `CONNECTED -> RECONNECTING|DRAINING|CLOSED`
+- `RECONNECTING -> CONNECTED|DRAINING|CLOSED`
+- `DRAINING -> CLOSED`
+- `CLOSED -> CONNECTING`
 
 ## Main Transitions
 
