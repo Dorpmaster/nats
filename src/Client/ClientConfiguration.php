@@ -17,6 +17,10 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
         private float $reconnectBackoffMultiplier = 2.0,
         private float $reconnectJitterFraction = 0.2,
         private array $reconnectServers = [],
+        private int $maxWriteBufferMessages = 10_000,
+        private int $maxWriteBufferBytes = 5_000_000,
+        private WriteBufferPolicy $writeBufferPolicy = WriteBufferPolicy::ERROR,
+        private bool $bufferWhileReconnecting = false,
     ) {
     }
 
@@ -59,5 +63,25 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
     public function getReconnectServers(): array
     {
         return $this->reconnectServers;
+    }
+
+    public function getMaxWriteBufferMessages(): int
+    {
+        return $this->maxWriteBufferMessages;
+    }
+
+    public function getMaxWriteBufferBytes(): int
+    {
+        return $this->maxWriteBufferBytes;
+    }
+
+    public function getWriteBufferPolicy(): WriteBufferPolicy
+    {
+        return $this->writeBufferPolicy;
+    }
+
+    public function isBufferWhileReconnecting(): bool
+    {
+        return $this->bufferWhileReconnecting;
     }
 }

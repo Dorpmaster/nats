@@ -57,6 +57,17 @@ Details:
 
 - [docs/backpressure.md](docs/backpressure.md)
 
+Outbound write-buffer is configured in `ClientConfiguration`:
+
+```php
+$clientConfig = new ClientConfiguration(
+    maxWriteBufferMessages: 10000,
+    maxWriteBufferBytes: 5_000_000,
+    writeBufferPolicy: WriteBufferPolicy::ERROR,
+    bufferWhileReconnecting: false,
+);
+```
+
 ## Testing
 
 - Unit: `make phpunit`

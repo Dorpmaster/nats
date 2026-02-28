@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Domain\Client;
 
+use Dorpmaster\Nats\Client\WriteBufferPolicy;
+
 interface ClientConfigurationInterface
 {
     public function getWaitForStatusTimeout(): float;
@@ -22,4 +24,12 @@ interface ClientConfigurationInterface
 
     /** @return list<string> */
     public function getReconnectServers(): array;
+
+    public function getMaxWriteBufferMessages(): int;
+
+    public function getMaxWriteBufferBytes(): int;
+
+    public function getWriteBufferPolicy(): WriteBufferPolicy;
+
+    public function isBufferWhileReconnecting(): bool;
 }

@@ -14,7 +14,9 @@ use Amp\TimeoutException;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\MessageDispatcher;
+use Dorpmaster\Nats\Client\WriteBufferPolicy;
 use Dorpmaster\Nats\Client\SubscriptionStorage;
+use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
@@ -144,15 +146,79 @@ final class ClientReconnectIntegrationTest extends TestCase
         });
     }
 
-    private function createReconnectClient(): Client
+    public function testBufferedPublishOverflowsAndFlushesAfterServerRecovery(): void
+    {
+        $this->setTimeout(40);
+        $this->runAsyncTest(function () {
+            // Arrange
+            $client   = $this->createReconnectClient(new ClientConfiguration(
+                reconnectEnabled: true,
+                maxReconnectAttempts: 20,
+                reconnectBackoffInitialMs: 50,
+                reconnectBackoffMaxMs: 500,
+                reconnectBackoffMultiplier: 2.0,
+                reconnectJitterFraction: 0.0,
+                maxWriteBufferMessages: 3,
+                maxWriteBufferBytes: 2_000,
+                writeBufferPolicy: WriteBufferPolicy::ERROR,
+                bufferWhileReconnecting: true,
+            ));
+            $subject  = sprintf('it.reconnect.buffer.%s', bin2hex(random_bytes(6)));
+            $received = [];
+
+            try {
+                $client->connect();
+                $sid = $client->subscribe($subject, static function (NatsProtocolMessageInterface $message) use (&$received): null {
+                    $received[] = $message->getPayload();
+
+                    return null;
+                });
+
+                NatsServerHarness::stop();
+                NatsServerHarness::waitUntilDown();
+
+                // Act
+                $overflowed = false;
+                $deadline   = microtime(true) + 3.0;
+                while (microtime(true) < $deadline) {
+                    try {
+                        $client->publish(new PubMessage($subject, 'buf-' . bin2hex(random_bytes(2))));
+                    } catch (WriteBufferOverflowException) {
+                        $overflowed = true;
+                        break;
+                    } catch (\Throwable) {
+                        // Reconnect is in progress; keep bounded retry loop.
+                    }
+                    delay(0.01);
+                }
+
+                // Assert
+                self::assertTrue($overflowed, 'Expected write buffer overflow while server is down');
+
+                // Act
+                NatsServerHarness::start();
+                NatsServerHarness::waitUntilReady();
+                $this->publishUntilDelivered($client, $subject, 'after-recovery', $received, 1, 5.0);
+                $client->unsubscribe($sid);
+
+                // Assert
+                self::assertGreaterThanOrEqual(1, count($received));
+            } finally {
+                NatsServerHarness::ensureUp();
+                $client->disconnect();
+            }
+        });
+    }
+
+    private function createReconnectClient(ClientConfiguration|null $clientConfiguration = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
         $connector = new RetrySocketConnector(new DnsSocketConnector());
         $config    = new ConnectionConfiguration(NatsServerHarness::host(), NatsServerHarness::port());
 
-        $connection          = new Connection($connector, $config, $this->logger);
-        $clientConfiguration = new ClientConfiguration(
+        $connection            = new Connection($connector, $config, $this->logger);
+        $clientConfiguration ??= new ClientConfiguration(
             reconnectEnabled: true,
             maxReconnectAttempts: 20,
             reconnectBackoffInitialMs: 50,
@@ -160,7 +226,7 @@ final class ClientReconnectIntegrationTest extends TestCase
             reconnectBackoffMultiplier: 2.0,
             reconnectJitterFraction: 0.0,
         );
-        $eventDispatcher     = new EventDispatcher();
+        $eventDispatcher       = new EventDispatcher();
 
         $connectionInfo    = new ConnectInfo(false, false, false, 'php', PHP_VERSION);
         $storage           = new SubscriptionStorage();

@@ -10,23 +10,28 @@ use Amp\CompositeCancellation;
 use Amp\DeferredFuture;
 use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
+use Dorpmaster\Nats\Domain\Client\ClientInterface;
+use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
 use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
-use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectBackoffServiceInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectDelayHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
+use Dorpmaster\Nats\Domain\Client\WriteBufferInterface;
+use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
 use Dorpmaster\Nats\Protocol\HPubMessage;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
+use Dorpmaster\Nats\Protocol\OutboundFrameBuilder;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Protocol\SubMessage;
 use Dorpmaster\Nats\Protocol\UnSubMessage;
@@ -48,6 +53,8 @@ final class Client implements ClientInterface
     private array $subscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
     private readonly ReconnectBackoffServiceInterface $reconnectBackoffService;
+    private readonly WriteBufferInterface $writeBuffer;
+    private readonly OutboundFrameBuilder $outboundFrameBuilder;
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
@@ -61,6 +68,8 @@ final class Client implements ClientInterface
         SubscriptionIdHelperInterface|null $subscriptionIdHelper = null,
         ReconnectDelayHelperInterface|null $reconnectDelayHelper = null,
         ReconnectBackoffServiceInterface|null $reconnectBackoffService = null,
+        WriteBufferInterface|null $writeBuffer = null,
+        OutboundFrameBuilder|null $outboundFrameBuilder = null,
     ) {
         $this->status                  = ClientState::NEW;
         $this->subscriptionIdHelper    = $subscriptionIdHelper ?? new SubscriptionIdHelper();
@@ -69,6 +78,18 @@ final class Client implements ClientInterface
                 $this->delayStrategy ?? new EventLoopDelayStrategy(),
                 $reconnectDelayHelper ?? new ReconnectDelayHelper(),
             );
+        $this->writeBuffer             = $writeBuffer ?? new WriteBufferService(
+            $this->configuration->getMaxWriteBufferMessages(),
+            $this->configuration->getMaxWriteBufferBytes(),
+            $this->configuration->getWriteBufferPolicy(),
+            $this->logger,
+        );
+        $this->writeBuffer->setFailureHandler(function (Throwable $exception): void {
+            if ($this->status === ClientState::CONNECTED) {
+                $this->tryReconnect($exception);
+            }
+        });
+        $this->outboundFrameBuilder = $outboundFrameBuilder ?? new OutboundFrameBuilder();
     }
 
     public function connect(): void
@@ -191,22 +212,11 @@ final class Client implements ClientInterface
 
                 if ($response !== null) {
                     try {
-                        $this->logger?->debug('Sending the response message', [
+                        $this->logger?->debug('Queueing the response message', [
                             'message' => $response,
                         ]);
 
-                        if ($this->connection->isClosed()) {
-                            $this->logger?->error(
-                                'Could not send the response message because the connection has already closed'
-                            );
-                            $this->deferredDispatching->complete();
-
-                            continue;
-                        }
-
-                        $this->connection->send($response);
-
-                        $this->logger?->debug('Response message has successfully sent');
+                        $this->enqueueOutbound($response, true);
                     } catch (Throwable $exception) {
                         $this->logger?->error('An exception was thrown during sending the response message', [
                             'exception' => $exception,
@@ -290,6 +300,8 @@ final class Client implements ClientInterface
                 );
             }
         }
+
+        $this->writeBuffer->drain($timeoutMs);
 
         $this->unsubscribeAll();
         $this->connection->close();
@@ -379,20 +391,7 @@ final class Client implements ClientInterface
      */
     public function publish(PubMessageInterface|HPubMessageInterface $message): void
     {
-        if (in_array($this->status, [ClientState::DRAINING, ClientState::CLOSED], true)) {
-            throw new ConnectionException(sprintf('Could not publish while client state is %s', $this->status->value));
-        }
-
-        try {
-            $this->connection->send($message);
-        } catch (Throwable $exception) {
-            $this->logger?->error('An exception was thrown while publishing the message', [
-                'exception' => $exception,
-                'subject' => $message->getSubject(),
-            ]);
-
-            throw $exception;
-        }
+        $this->enqueueOutbound($message);
     }
 
     public function request(
@@ -452,7 +451,6 @@ final class Client implements ClientInterface
             }
         }
     }
-
 
     /**
      * @throws CancelledException
@@ -636,6 +634,57 @@ final class Client implements ClientInterface
             'reason' => $reason,
         ]);
         $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
+
+        if ($targetState === ClientState::CONNECTED) {
+            $this->writeBuffer->start($this->connection);
+        }
+
+        if (in_array($targetState, [ClientState::RECONNECTING, ClientState::CLOSED], true)) {
+            if ($targetState === ClientState::RECONNECTING && $this->configuration->isBufferWhileReconnecting()) {
+                $this->writeBuffer->detach();
+            } else {
+                $this->writeBuffer->stop();
+            }
+        }
+    }
+
+    private function enqueueOutbound(NatsProtocolMessageInterface $message, bool $allowBufferWhileReconnecting = false): bool
+    {
+        $state = $this->status;
+        if (in_array($state, [ClientState::DRAINING, ClientState::CLOSED], true)) {
+            throw new ConnectionException(sprintf('Could not publish while client state is %s', $state->value));
+        }
+
+        if ($state === ClientState::NEW) {
+            throw new ClientNotConnectedException('Client is not connected yet');
+        }
+
+        if (
+            in_array($state, [ClientState::CONNECTING, ClientState::RECONNECTING], true)
+            && !$this->configuration->isBufferWhileReconnecting()
+            && !$allowBufferWhileReconnecting
+        ) {
+            throw new ClientNotConnectedException(sprintf(
+                'Could not publish while client state is %s',
+                $state->value,
+            ));
+        }
+
+        $frame = $this->outboundFrameBuilder->build($message);
+
+        try {
+            return $this->writeBuffer->enqueue($frame);
+        } catch (WriteBufferOverflowException $exception) {
+            $this->logger?->warning('Outbound write buffer overflow', [
+                'state' => $state->value,
+                'frame_bytes' => $frame->bytes,
+                'pending_messages' => $this->writeBuffer->getPendingMessages(),
+                'pending_bytes' => $this->writeBuffer->getPendingBytes(),
+                'exception' => $exception,
+            ]);
+
+            throw $exception;
+        }
     }
 
     public function getState(): ClientState

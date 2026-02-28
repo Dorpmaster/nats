@@ -4,6 +4,7 @@
 
 Backpressure v1 is implemented at message-dispatcher level with per-subscription pending message limits.
 `ClientConfiguration` does not apply inbound backpressure settings.
+Outbound write-buffer backpressure is configured in `ClientConfiguration`.
 
 ## Controls
 
@@ -27,4 +28,26 @@ Configure these values directly in `MessageDispatcher` constructor:
 
 - This is v1 minimal protection.
 - Inbound byte limit is applied to `MSG` payload size and `HMSG` total size (`headers + payload`).
-- Outbound write-buffer limits are not yet implemented.
+
+## Outbound write-buffer
+
+Controls (`ClientConfiguration`):
+
+- `maxWriteBufferMessages` (default: `10000`)
+- `maxWriteBufferBytes` (default: `5000000`)
+- `writeBufferPolicy`:
+  - `ERROR` (default): throw `WriteBufferOverflowException`
+  - `DROP_NEW`: drop only the new message
+- `bufferWhileReconnecting` (default: `false`)
+
+State behavior for `publish()`/`request()`:
+
+- `CONNECTED`: enqueue and write through writer-loop
+- `CONNECTING` / `RECONNECTING`:
+  - `bufferWhileReconnecting=false` -> `ClientNotConnectedException`
+  - `bufferWhileReconnecting=true` -> enqueue (within limits)
+- `DRAINING` / `CLOSED`: rejected (`ConnectionException`)
+
+Drain semantics:
+
+- `drain()` rejects new enqueue, flushes queued outbound messages, then closes connection.
