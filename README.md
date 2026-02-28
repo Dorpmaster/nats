@@ -98,7 +98,8 @@ Cluster discovery groundwork is available:
 - seed servers can be configured in `ClientConfiguration`
 - `INFO.connect_urls` can be discovered and added to an internal server pool
 
-Failover switching is planned in the next iteration.
+Reconnect failover can switch to the next node in server pool and mark failed node as temporarily dead.
+Docker cluster integration coverage is planned in the next iteration.
 
 Details:
 

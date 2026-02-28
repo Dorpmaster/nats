@@ -23,6 +23,7 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
         private float $reconnectJitterFraction = 0.2,
         private array $reconnectServers = [],
         private array $servers = [],
+        private int $deadServerCooldownMs = 2_000,
         private int $maxWriteBufferMessages = 10_000,
         private int $maxWriteBufferBytes = 5_000_000,
         private WriteBufferPolicy $writeBufferPolicy = WriteBufferPolicy::ERROR,
@@ -81,6 +82,11 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
     public function getServers(): array
     {
         return $this->servers;
+    }
+
+    public function getDeadServerCooldownMs(): int
+    {
+        return $this->deadServerCooldownMs;
     }
 
     public function getMaxWriteBufferMessages(): int

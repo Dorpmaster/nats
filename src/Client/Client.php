@@ -27,6 +27,7 @@ use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Connection\ServerAddress;
 use Dorpmaster\Nats\Domain\Connection\ServerPoolInterface;
+use Dorpmaster\Nats\Domain\Connection\ServerSelectableConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
 use Dorpmaster\Nats\Connection\ServerPoolService;
@@ -123,7 +124,6 @@ final class Client implements ClientInterface
         $servers                        = $this->configuration->getServers();
         if ($servers !== []) {
             $this->serverPool->addServers($servers);
-            $this->serverPool->setCurrent($servers[0]);
         }
     }
 
@@ -170,8 +170,13 @@ final class Client implements ClientInterface
 
         $this->transitionTo(ClientState::CONNECTING, 'connect() started');
 
+        $server = $this->selectServerForConnect();
+
         try {
-            $this->connection->open($this->cancellation);
+            $this->openConnectionForServer($server);
+            if ($server !== null) {
+                $this->serverPool->setCurrent($server);
+            }
             $this->logger?->debug('Connection has successfully opened');
         } catch (ConnectionException $exception) {
             $this->transitionTo(ClientState::CLOSED, 'open() failed');
@@ -584,7 +589,7 @@ final class Client implements ClientInterface
         $this->transitionTo(ClientState::RECONNECTING, 'reconnect started');
 
         $maxAttempts = $this->configuration->getMaxReconnectAttempts();
-        $attempt     = 0;
+        $attempt     = 0; // Count only real open() attempts.
 
         while (true) {
             if ($maxAttempts !== null && $attempt >= $maxAttempts) {
@@ -598,19 +603,36 @@ final class Client implements ClientInterface
                 return false;
             }
 
+            $server          = $this->selectServerForReconnect();
+            $hasKnownServers = $this->serverPool->allServers() !== [];
+            if ($server === null && $hasKnownServers) {
+                if (!$this->waitReconnectBackoff(max(1, $attempt + 1), $this->activeReconnectBackoffEpoch)) {
+                    return false;
+                }
+
+                continue;
+            }
+
             $attempt++;
             try {
                 $this->connection->close();
-                $this->connection->open($this->cancellation);
+                $this->openConnectionForServer($server);
                 if ($this->connection->isClosed()) {
                     throw new ConnectionException('Reconnect open() returned a closed connection');
+                }
+                if ($server !== null) {
+                    $this->serverPool->setCurrent($server);
                 }
                 $this->transitionTo(ClientState::CONNECTED, 'reconnect succeeded');
 
                 return true;
             } catch (Throwable $exception) {
+                if ($server !== null) {
+                    $this->serverPool->markDead($server, $this->configuration->getDeadServerCooldownMs());
+                }
                 $this->logger?->warning('Reconnect attempt failed', [
                     'attempt' => $attempt,
+                    'server' => $server?->toUri(),
                     'exception' => $exception,
                 ]);
             }
@@ -619,6 +641,33 @@ final class Client implements ClientInterface
                 return false;
             }
         }
+    }
+
+    private function selectServerForConnect(): ServerAddress|null
+    {
+        return $this->serverPool->nextServer();
+    }
+
+    private function selectServerForReconnect(): ServerAddress|null
+    {
+        $current = $this->serverPool->getCurrent();
+        if ($current !== null) {
+            $this->serverPool->markDead($current, $this->configuration->getDeadServerCooldownMs());
+        }
+
+        return $this->serverPool->nextServer();
+    }
+
+    /**
+     * @throws ConnectionException
+     */
+    private function openConnectionForServer(ServerAddress|null $server): void
+    {
+        if ($server !== null && $this->connection instanceof ServerSelectableConnectionInterface) {
+            $this->connection->useServer($server);
+        }
+
+        $this->connection->open($this->cancellation);
     }
 
     private function waitReconnectBackoff(int $attempt, int|null $epoch): bool

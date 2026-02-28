@@ -31,6 +31,8 @@ interface ClientConfigurationInterface
     /** @return list<ServerAddress> */
     public function getServers(): array;
 
+    public function getDeadServerCooldownMs(): int;
+
     public function getMaxWriteBufferMessages(): int;
 
     public function getMaxWriteBufferBytes(): int;

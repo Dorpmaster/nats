@@ -16,6 +16,8 @@ use Amp\Socket\SocketConnector;
 use Dorpmaster\Nats\Domain\Connection\ConnectionConfigurationInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
+use Dorpmaster\Nats\Domain\Connection\ServerAddress;
+use Dorpmaster\Nats\Domain\Connection\ServerSelectableConnectionInterface;
 use Dorpmaster\Nats\Protocol\Contracts\InfoMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
@@ -23,10 +25,11 @@ use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Throwable;
 
-final class Connection implements ConnectionInterface
+final class Connection implements ConnectionInterface, ServerSelectableConnectionInterface
 {
     private Socket|null $socket               = null;
     private ConcurrentIterator|null $iterator = null;
+    private ServerAddress|null $activeServer  = null;
 
     public function __construct(
         private readonly SocketConnector $connector,
@@ -177,12 +180,20 @@ final class Connection implements ConnectionInterface
         return $this->socket?->isClosed() ?? true;
     }
 
+    public function useServer(ServerAddress $server): void
+    {
+        $this->activeServer = $server;
+    }
+
     private function createConnectUri(): string
     {
+        $host = $this->activeServer?->getHost() ?? $this->configuration->getHost();
+        $port = $this->activeServer?->getPort() ?? $this->configuration->getPort();
+
         return sprintf(
             'tcp://%s:%d',
-            $this->configuration->getHost(),
-            $this->configuration->getPort()
+            $host,
+            $port
         );
     }
 
@@ -194,7 +205,8 @@ final class Connection implements ConnectionInterface
             return $context;
         }
 
-        $peerName   = $tls->getServerName() ?? $this->configuration->getHost();
+        $host       = $this->activeServer?->getHost() ?? $this->configuration->getHost();
+        $peerName   = $this->activeServer?->getServerName() ?? $tls->getServerName() ?? $host;
         $tlsContext = new ClientTlsContext($peerName);
         $tlsContext = $tls->isVerifyPeer()
             ? $tlsContext->withPeerVerification()

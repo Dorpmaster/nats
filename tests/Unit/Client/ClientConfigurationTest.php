@@ -28,6 +28,7 @@ final class ClientConfigurationTest extends TestCase
         self::assertSame(0.2, $configuration->getReconnectJitterFraction());
         self::assertSame([], $configuration->getReconnectServers());
         self::assertSame([], $configuration->getServers());
+        self::assertSame(2_000, $configuration->getDeadServerCooldownMs());
         self::assertSame(10_000, $configuration->getMaxWriteBufferMessages());
         self::assertSame(5_000_000, $configuration->getMaxWriteBufferBytes());
         self::assertSame(WriteBufferPolicy::ERROR, $configuration->getWriteBufferPolicy());
@@ -55,6 +56,7 @@ final class ClientConfigurationTest extends TestCase
             reconnectJitterFraction: 0.0,
             reconnectServers: ['nats://127.0.0.1:4222'],
             servers: [new ServerAddress('127.0.0.1', 4222)],
+            deadServerCooldownMs: 10_000,
             maxWriteBufferMessages: 50,
             maxWriteBufferBytes: 123_456,
             writeBufferPolicy: WriteBufferPolicy::DROP_NEW,
@@ -75,6 +77,7 @@ final class ClientConfigurationTest extends TestCase
         self::assertSame(0.0, $configuration->getReconnectJitterFraction());
         self::assertSame(['nats://127.0.0.1:4222'], $configuration->getReconnectServers());
         self::assertEquals([new ServerAddress('127.0.0.1', 4222)], $configuration->getServers());
+        self::assertSame(10_000, $configuration->getDeadServerCooldownMs());
         self::assertSame(50, $configuration->getMaxWriteBufferMessages());
         self::assertSame(123_456, $configuration->getMaxWriteBufferBytes());
         self::assertSame(WriteBufferPolicy::DROP_NEW, $configuration->getWriteBufferPolicy());
