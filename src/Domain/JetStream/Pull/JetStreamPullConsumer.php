@@ -25,15 +25,18 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
 
     private JetStreamMessageAcknowledgerInterface $acknowledger;
     private JetStreamMessageAckerInterface $messageAcker;
+    private JetStreamConsumeLoop $consumeLoop;
 
     public function __construct(
         private readonly JetStreamControlPlaneTransportInterface $transport,
         private readonly string $stream,
         private readonly string $consumer,
         JetStreamMessageAcknowledgerInterface|null $acknowledger = null,
+        JetStreamConsumeLoop|null $consumeLoop = null,
     ) {
         $this->acknowledger = $acknowledger ?? new JetStreamClientAcknowledger($this->transport->getClient());
         $this->messageAcker = new JetStreamMessageAcker($this->acknowledger);
+        $this->consumeLoop  = $consumeLoop ?? new JetStreamConsumeLoop();
     }
 
     public function fetch(
@@ -174,7 +177,28 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
             payload: $payload,
             headers: $headers,
             replyTo: $replyTo,
+            sizeBytes: $this->calculateMessageSizeBytes($payload, $headers),
         );
+    }
+
+    public function consume(PullConsumeOptions $options): JetStreamConsumeHandle
+    {
+        $handle = new JetStreamConsumeHandle($this->messageAcker, $options);
+
+        $this->consumeLoop->start(
+            $handle,
+            function () use ($options): JetStreamFetchResult {
+                return $this->fetch(
+                    batch: $options->batch,
+                    expiresMs: $options->expiresMs,
+                    noWait: $options->noWait,
+                    maxBytes: $options->maxBytes,
+                    idleHeartbeatMs: $options->idleHeartbeatMs,
+                );
+            },
+        );
+
+        return $handle;
     }
 
     private function throwIfJsonErrorPayload(string $payload): void
@@ -197,5 +221,16 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         }
 
         throw new JetStreamApiException($code, $description);
+    }
+
+    /** @param array<string, string> $headers */
+    private function calculateMessageSizeBytes(string $payload, array $headers): int
+    {
+        $size = strlen($payload);
+        foreach ($headers as $name => $value) {
+            $size += strlen($name) + strlen($value);
+        }
+
+        return $size;
     }
 }

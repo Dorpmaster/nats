@@ -6,10 +6,18 @@ namespace Dorpmaster\Nats\Domain\JetStream\Message;
 
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 
-final readonly class JetStreamMessageAcker implements JetStreamMessageAckerInterface
+final class JetStreamMessageAcker implements JetStreamMessageAckerInterface
 {
+    /** @var array<int, AckObserverInterface> */
+    private array $observersByMessageId = [];
+
     public function __construct(private JetStreamMessageAcknowledgerInterface $acknowledger)
     {
+    }
+
+    public function observe(JetStreamMessageInterface $message, AckObserverInterface $observer): void
+    {
+        $this->observersByMessageId[spl_object_id($message)] = $observer;
     }
 
     public function ack(JetStreamMessageInterface $message): void
@@ -45,5 +53,21 @@ final readonly class JetStreamMessageAcker implements JetStreamMessageAckerInter
         }
 
         $this->acknowledger->acknowledge($replyTo, $payload);
+
+        if (in_array($payload, ['+ACK', '-NAK', '+TERM'], true)) {
+            $this->notifyAcknowledged($message);
+        }
+    }
+
+    private function notifyAcknowledged(JetStreamMessageInterface $message): void
+    {
+        $id       = spl_object_id($message);
+        $observer = $this->observersByMessageId[$id] ?? null;
+        if ($observer === null) {
+            return;
+        }
+
+        unset($this->observersByMessageId[$id]);
+        $observer->onMessageAcknowledged($message);
     }
 }

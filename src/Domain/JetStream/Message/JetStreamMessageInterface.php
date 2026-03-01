@@ -13,5 +13,7 @@ interface JetStreamMessageInterface
     /** @return array<string, string> */
     public function getHeaders(): array;
 
+    public function getSizeBytes(): int;
+
     public function getReplyTo(): string|null;
 }

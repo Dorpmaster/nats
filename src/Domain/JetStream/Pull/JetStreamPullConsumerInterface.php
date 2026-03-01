@@ -13,4 +13,6 @@ interface JetStreamPullConsumerInterface
         int|null $maxBytes = null,
         int|null $idleHeartbeatMs = null,
     ): JetStreamFetchResult;
+
+    public function consume(PullConsumeOptions $options): JetStreamConsumeHandle;
 }

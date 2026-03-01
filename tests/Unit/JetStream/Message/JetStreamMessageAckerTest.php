@@ -20,7 +20,7 @@ final class JetStreamMessageAckerTest extends TestCase
             ->method('acknowledge')
             ->with('$JS.ACK.ORDERS.C1.1', '+ACK');
 
-        $message = new JetStreamMessage('orders.created', 'payload', [], '$JS.ACK.ORDERS.C1.1');
+        $message = new JetStreamMessage('orders.created', 'payload', [], '$JS.ACK.ORDERS.C1.1', 7);
         $acker   = new JetStreamMessageAcker($acknowledger);
 
         // Act
@@ -44,7 +44,7 @@ final class JetStreamMessageAckerTest extends TestCase
                 }),
             );
 
-        $message = new JetStreamMessage('orders.created', 'payload', [], '$JS.ACK.ORDERS.C1.1');
+        $message = new JetStreamMessage('orders.created', 'payload', [], '$JS.ACK.ORDERS.C1.1', 7);
         $acker   = new JetStreamMessageAcker($acknowledger);
 
         // Act
@@ -64,7 +64,7 @@ final class JetStreamMessageAckerTest extends TestCase
             ->method('acknowledge')
             ->with('$JS.ACK.ORDERS.C1.1', '-NAK 250000000');
 
-        $message = new JetStreamMessage('orders.created', 'payload', [], '$JS.ACK.ORDERS.C1.1');
+        $message = new JetStreamMessage('orders.created', 'payload', [], '$JS.ACK.ORDERS.C1.1', 7);
         $acker   = new JetStreamMessageAcker($acknowledger);
 
         // Act
@@ -78,7 +78,7 @@ final class JetStreamMessageAckerTest extends TestCase
     {
         // Arrange
         $acknowledger = $this->createStub(JetStreamMessageAcknowledgerInterface::class);
-        $message      = new JetStreamMessage('orders.created', 'payload', [], null);
+        $message      = new JetStreamMessage('orders.created', 'payload', [], null, 7);
         $acker        = new JetStreamMessageAcker($acknowledger);
 
         // Assert

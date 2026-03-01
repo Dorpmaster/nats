@@ -275,9 +275,9 @@ $ack = $publisher->publish(
 
 See [docs/jetstream-publish.md](docs/jetstream-publish.md).
 
-## JetStream Pull (MVP)
+## JetStream Pull (MVP + Continuous Loop)
 
-JetStream pull consumer supports bounded `fetch()` and explicit ack API through a dedicated message acker service.
+JetStream pull consumer supports bounded `fetch()` and continuous `consume()` loop with local backpressure controls.
 
 Example:
 
@@ -290,6 +290,19 @@ $result = $pull->fetch(batch: 10, expiresMs: 2000);
 $acker = $result->getAcker();
 
 foreach ($result->messages() as $message) {
+    $acker->ack($message);
+}
+```
+
+Continuous loop example:
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Pull\PullConsumeOptions;
+
+$handle = $pull->consume(new PullConsumeOptions(batch: 10, expiresMs: 1000));
+$acker = $handle->getAcker();
+
+while (($message = $handle->next(2000)) !== null) {
     $acker->ack($message);
 }
 ```

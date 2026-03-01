@@ -7,6 +7,7 @@ namespace Dorpmaster\Nats\Tests\Unit\JetStream\Pull;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
+use Dorpmaster\Nats\Domain\JetStream\Pull\PullConsumeOptions;
 use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumer;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInterface;
 use Dorpmaster\Nats\Protocol\MsgMessage;
@@ -124,5 +125,48 @@ final class JetStreamPullConsumerTest extends TestCase
 
         // Assert
         self::assertSame(0, $result->getReceivedCount());
+    }
+
+    public function testConsumeReturnsMessagesViaHandle(): void
+    {
+        // Arrange
+        $handler   = null;
+        $fetchCall = 0;
+
+        $client = $this->createMock(ClientInterface::class);
+        $client->method('subscribe')
+            ->willReturnCallback(static function (string $_subject, \Closure $closure) use (&$handler): string {
+                $handler = $closure;
+
+                return 'sid';
+            });
+        $client->expects(self::atLeastOnce())->method('unsubscribe')->with('sid');
+
+        $transport = $this->createStub(JetStreamControlPlaneTransportInterface::class);
+        $transport->method('getClient')->willReturn($client);
+        $transport->method('getSubscriptionIdHelper')->willReturn($helper = $this->createStub(SubscriptionIdHelperInterface::class));
+        $helper->method('generateId')->willReturn('sid-4');
+        $transport->method('publishRequest')
+            ->willReturnCallback(function () use (&$handler, &$fetchCall): void {
+                $fetchCall++;
+                if ($fetchCall !== 1) {
+                    return;
+                }
+
+                $handler(new MsgMessage('orders.created', '1', 'm1', 'ACK.ORDERS.C1.1'));
+            });
+
+        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1');
+        $options  = new PullConsumeOptions(batch: 1, expiresMs: 100, noWait: true);
+
+        // Act
+        $handle  = $consumer->consume($options);
+        $message = $handle->next(500);
+        $handle->stop();
+        $none = $handle->next(200);
+
+        // Assert
+        self::assertSame('m1', $message?->getPayload());
+        self::assertNull($none);
     }
 }
