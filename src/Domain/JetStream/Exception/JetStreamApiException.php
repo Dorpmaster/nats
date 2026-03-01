@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Domain\JetStream\Exception;
 
-final class JetStreamApiException extends \RuntimeException
+class JetStreamApiException extends \RuntimeException
 {
     public function __construct(
         private readonly int $apiCode,

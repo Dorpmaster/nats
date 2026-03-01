@@ -13,7 +13,7 @@ use stdClass;
 
 final readonly class JetStreamControlPlaneTransport implements JetStreamControlPlaneTransportInterface
 {
-    private const string API_PREFIX = '$JS.API.';
+    private const string API_PREFIX   = '$JS.API.';
     private const string REPLY_PREFIX = 'JSREPLY';
     private SubscriptionIdHelperInterface $subscriptionIdHelper;
 

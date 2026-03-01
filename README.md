@@ -251,6 +251,30 @@ Current scope is admin only (no JetStream publish/data-plane consumer implementa
 
 See [docs/jetstream-admin.md](docs/jetstream-admin.md).
 
+## JetStream Publisher (MVP)
+
+JetStream publisher sends payload to stream subjects and expects `PubAck` response from the server.
+
+- payload is sent as binary data
+- PubAck is parsed from JSON response
+- supports dedup and expectations via publish headers
+
+Example:
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Publish\JetStreamPublisher;
+use Dorpmaster\Nats\Domain\JetStream\Publish\PublishOptions;
+
+$publisher = new JetStreamPublisher($client);
+$ack = $publisher->publish(
+    'orders.created',
+    'hello',
+    PublishOptions::create(msgId: 'orders-1'),
+);
+```
+
+See [docs/jetstream-publish.md](docs/jetstream-publish.md).
+
 ## Testing
 
 ```bash
@@ -283,6 +307,7 @@ make test
 - [docs/drain.md](docs/drain.md)
 - [docs/tls.md](docs/tls.md)
 - [docs/jetstream-admin.md](docs/jetstream-admin.md)
+- [docs/jetstream-publish.md](docs/jetstream-publish.md)
 
 ## License
 
