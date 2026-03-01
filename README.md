@@ -307,6 +307,10 @@ while (($message = $handle->next(2000)) !== null) {
 }
 ```
 
+Notes:
+- `drain(timeout)` waits for both internal queue empty and `inFlight=0`; unacked messages will cause timeout.
+- Under `DROP_NEW`, redelivery can happen; if `Nats-Num-Delivered > 5` header is present, dropped message is auto-terminated (`+TERM`).
+
 See [docs/jetstream-pull.md](docs/jetstream-pull.md).
 
 ## Testing

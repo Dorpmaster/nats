@@ -18,6 +18,7 @@ final class JetStreamMessageTest extends TestCase
             headers: ['Nats-Msg-Id' => 'id-1'],
             replyTo: '$JS.ACK.ORDERS.C1.1',
             sizeBytes: 123,
+            deliveryCount: 2,
         );
 
         // Act
@@ -26,6 +27,7 @@ final class JetStreamMessageTest extends TestCase
         $headers = $message->getHeaders();
         $replyTo = $message->getReplyTo();
         $size    = $message->getSizeBytes();
+        $count   = $message->getDeliveryCount();
 
         // Assert
         self::assertSame('orders.created', $subject);
@@ -33,5 +35,6 @@ final class JetStreamMessageTest extends TestCase
         self::assertSame(['Nats-Msg-Id' => 'id-1'], $headers);
         self::assertSame('$JS.ACK.ORDERS.C1.1', $replyTo);
         self::assertSame(123, $size);
+        self::assertSame(2, $count);
     }
 }

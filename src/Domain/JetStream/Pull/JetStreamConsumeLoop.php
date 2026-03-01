@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Domain\JetStream\Pull;
 
 use Dorpmaster\Nats\Client\EventLoopDelayStrategy;
+use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
+use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamTimeoutException;
+use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Revolt\EventLoop;
 
 final class JetStreamConsumeLoop
@@ -25,7 +28,7 @@ final class JetStreamConsumeLoop
             try {
                 while ($handle->isRunning() || $handle->isDraining()) {
                     if ($handle->isDraining()) {
-                        if ($handle->getQueuedMessages() === 0) {
+                        if ($handle->getQueuedMessages() === 0 && $handle->getInFlightMessages() === 0) {
                             $handle->stop();
                             break;
                         }
@@ -34,7 +37,17 @@ final class JetStreamConsumeLoop
                         continue;
                     }
 
-                    $result = $fetch();
+                    try {
+                        $result = $fetch();
+                    } catch (JetStreamTimeoutException | ConnectionException | ClientNotConnectedException | JetStreamApiException $exception) {
+                        if (!$handle->isRunning()) {
+                            break;
+                        }
+
+                        $this->getDelayStrategy()->delay(self::NO_WAIT_POLL_DELAY_MS);
+                        continue;
+                    }
+
                     foreach ($result->messages() as $message) {
                         $handle->offer($message);
                     }

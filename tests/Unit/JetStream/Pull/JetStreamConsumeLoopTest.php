@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Tests\Unit\JetStream\Pull;
 
+use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessage;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAcker;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAcknowledgerInterface;
@@ -70,7 +71,43 @@ final class JetStreamConsumeLoopTest extends TestCase
 
         // Act
         $first = $handle->next(500);
+        self::assertNotNull($first);
+        $acker->ack($first);
         $handle->drain(500);
+        $none = $handle->next(100);
+
+        // Assert
+        self::assertSame('m1', $first->getPayload());
+        self::assertNull($none);
+    }
+
+    public function testLoopContinuesAfterReconnectRelatedFetchFailure(): void
+    {
+        // Arrange
+        $acknowledger = $this->createStub(JetStreamMessageAcknowledgerInterface::class);
+        $acker        = new JetStreamMessageAcker($acknowledger);
+        $handle       = new JetStreamConsumeHandle($acker, new PullConsumeOptions(batch: 1, expiresMs: 1000));
+        $loop         = new JetStreamConsumeLoop();
+        $calls        = 0;
+        $loop->start($handle, function () use (&$calls, $acker, $handle): JetStreamFetchResult {
+            $calls++;
+            if ($calls === 1) {
+                throw new ConnectionException('temporary reconnect');
+            }
+
+            if ($calls === 2) {
+                return new JetStreamFetchResult([
+                    new JetStreamMessage('s', 'm1', [], 'r1', 2),
+                ], $acker);
+            }
+
+            $handle->stop();
+            return new JetStreamFetchResult([], $acker);
+        });
+
+        // Act
+        $first = $handle->next(1_000);
+        $handle->stop();
         $none = $handle->next(100);
 
         // Assert

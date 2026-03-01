@@ -172,12 +172,15 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
             }
         }
 
+        $deliveryCount = $this->extractDeliveryCount($headers);
+
         return new JetStreamMessage(
             subject: $message->getSubject(),
             payload: $payload,
             headers: $headers,
             replyTo: $replyTo,
             sizeBytes: $this->calculateMessageSizeBytes($payload, $headers),
+            deliveryCount: $deliveryCount,
         );
     }
 
@@ -232,5 +235,28 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         }
 
         return $size;
+    }
+
+    /** @param array<string, string> $headers */
+    private function extractDeliveryCount(array $headers): int|null
+    {
+        foreach ($headers as $name => $value) {
+            if (strtolower($name) !== 'nats-num-delivered') {
+                continue;
+            }
+
+            if (!is_numeric($value)) {
+                return null;
+            }
+
+            $count = (int) $value;
+            if ($count < 1) {
+                return null;
+            }
+
+            return $count;
+        }
+
+        return null;
     }
 }

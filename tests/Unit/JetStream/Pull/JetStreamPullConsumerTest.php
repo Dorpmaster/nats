@@ -10,6 +10,8 @@ use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Pull\PullConsumeOptions;
 use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumer;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInterface;
+use Dorpmaster\Nats\Protocol\HMsgMessage;
+use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\MsgMessage;
 use PHPUnit\Framework\TestCase;
 
@@ -168,5 +170,44 @@ final class JetStreamPullConsumerTest extends TestCase
         // Assert
         self::assertSame('m1', $message?->getPayload());
         self::assertNull($none);
+    }
+
+    public function testFetchParsesDeliveryCountFromHeaders(): void
+    {
+        // Arrange
+        $handler = null;
+        $client  = $this->createMock(ClientInterface::class);
+        $client->method('subscribe')
+            ->willReturnCallback(static function (string $_subject, \Closure $closure) use (&$handler): string {
+                $handler = $closure;
+
+                return 'sid';
+            });
+        $client->expects(self::once())->method('unsubscribe')->with('sid');
+
+        $transport = $this->createStub(JetStreamControlPlaneTransportInterface::class);
+        $transport->method('getClient')->willReturn($client);
+        $transport->method('getSubscriptionIdHelper')->willReturn($helper = $this->createStub(SubscriptionIdHelperInterface::class));
+        $helper->method('generateId')->willReturn('sid-5');
+        $transport->method('publishRequest')
+            ->willReturnCallback(function () use (&$handler): void {
+                $handler(new HMsgMessage(
+                    subject: 'orders.created',
+                    sid: '1',
+                    payload: 'm1',
+                    headers: new HeaderBag(['Nats-Num-Delivered' => '6']),
+                    replyTo: 'ACK.ORDERS.C1.1',
+                ));
+            });
+
+        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1');
+
+        // Act
+        $result   = $consumer->fetch(batch: 1, expiresMs: 1000);
+        $messages = iterator_to_array($result->messages());
+
+        // Assert
+        self::assertCount(1, $messages);
+        self::assertSame(6, $messages[0]->getDeliveryCount());
     }
 }

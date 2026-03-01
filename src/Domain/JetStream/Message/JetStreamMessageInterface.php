@@ -16,4 +16,6 @@ interface JetStreamMessageInterface
     public function getSizeBytes(): int;
 
     public function getReplyTo(): string|null;
+
+    public function getDeliveryCount(): int|null;
 }

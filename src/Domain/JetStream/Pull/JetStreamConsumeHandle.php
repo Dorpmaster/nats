@@ -9,6 +9,7 @@ use Amp\DeferredFuture;
 use Amp\Pipeline\ConcurrentIterator;
 use Amp\Pipeline\Queue;
 use Amp\TimeoutCancellation;
+use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamDrainTimeoutException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamSlowConsumerException;
 use Dorpmaster\Nats\Domain\JetStream\Message\AckObserverInterface;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessage;
@@ -17,19 +18,19 @@ use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageInterface;
 
 final class JetStreamConsumeHandle implements AckObserverInterface
 {
-    private const int INTERNAL_QUEUE_CAPACITY = 1_000_000;
+    private const int INTERNAL_QUEUE_CAPACITY  = 1_000_000;
+    public const int MAX_DROP_NEW_REDELIVERIES = 5;
 
     private Queue $queue;
     /** @var ConcurrentIterator<JetStreamMessageInterface> */
     private ConcurrentIterator $iterator;
     private ConsumeState $state = ConsumeState::RUNNING;
     /** @var array<int, int> */
-    private array $inFlightByMessageId           = [];
-    private int $inFlightMessages                = 0;
-    private int $inFlightBytes                   = 0;
-    private int $queuedMessages                  = 0;
-    private \Throwable|null $failure             = null;
-    private DeferredFuture|null $deferredDrained = null;
+    private array $inFlightByMessageId = [];
+    private int $inFlightMessages      = 0;
+    private int $inFlightBytes         = 0;
+    private int $queuedMessages        = 0;
+    private \Throwable|null $failure   = null;
     private DeferredFuture $deferredStopped;
     private bool $queueCompleted = false;
 
@@ -62,7 +63,6 @@ final class JetStreamConsumeHandle implements AckObserverInterface
 
             $message              = $this->iterator->getValue();
             $this->queuedMessages = max(0, $this->queuedMessages - 1);
-            $this->completeDrainIfNeeded();
 
             $nextInFlightMessages = $this->inFlightMessages + 1;
             $nextInFlightBytes    = $this->inFlightBytes + $message->getSizeBytes();
@@ -71,6 +71,10 @@ final class JetStreamConsumeHandle implements AckObserverInterface
 
             if ($isOverflow) {
                 if ($this->options->policy === SlowConsumerPolicy::DROP_NEW) {
+                    if ($message instanceof JetStreamMessage && $this->shouldAutoTermDroppedMessage($message)) {
+                        $this->acker->term($message);
+                    }
+
                     continue;
                 }
 
@@ -125,14 +129,20 @@ final class JetStreamConsumeHandle implements AckObserverInterface
             $this->state = ConsumeState::DRAINING;
         }
 
-        if ($this->queuedMessages === 0) {
-            $this->stop();
-            return;
+        $timeoutSeconds = ($timeoutMs ?? 10_000) / 1000;
+        $deadline       = microtime(true) + $timeoutSeconds;
+        while ($this->queuedMessages > 0 || $this->inFlightMessages > 0) {
+            if (microtime(true) >= $deadline) {
+                if ($this->state === ConsumeState::DRAINING) {
+                    $this->state = ConsumeState::RUNNING;
+                }
+
+                throw new JetStreamDrainTimeoutException();
+            }
+
+            usleep(1_000);
         }
 
-        $this->deferredDrained ??= new DeferredFuture();
-        $timeout                 = ($timeoutMs ?? 10_000) / 1000;
-        $this->deferredDrained->getFuture()->await(new TimeoutCancellation($timeout));
         $this->stop();
         $this->awaitStopped($timeoutMs);
     }
@@ -158,6 +168,9 @@ final class JetStreamConsumeHandle implements AckObserverInterface
         unset($this->inFlightByMessageId[$id]);
         $this->inFlightMessages = max(0, $this->inFlightMessages - 1);
         $this->inFlightBytes    = max(0, $this->inFlightBytes - $size);
+        if ($this->state === ConsumeState::DRAINING && $this->queuedMessages === 0 && $this->inFlightMessages === 0) {
+            $this->stop();
+        }
     }
 
     public function onMessageAcknowledged(JetStreamMessageInterface $message): void
@@ -168,6 +181,10 @@ final class JetStreamConsumeHandle implements AckObserverInterface
     public function offer(JetStreamMessageInterface $message): void
     {
         if ($this->state !== ConsumeState::RUNNING && $this->state !== ConsumeState::DRAINING) {
+            return;
+        }
+
+        if ($this->queueCompleted) {
             return;
         }
 
@@ -216,15 +233,14 @@ final class JetStreamConsumeHandle implements AckObserverInterface
         return $this->queuedMessages;
     }
 
-    private function completeDrainIfNeeded(): void
+    public function getInFlightMessages(): int
     {
-        if ($this->queuedMessages > 0) {
-            return;
-        }
+        return $this->inFlightMessages;
+    }
 
-        if ($this->deferredDrained !== null && !$this->deferredDrained->isComplete()) {
-            $this->deferredDrained->complete();
-        }
+    public function getInFlightBytes(): int
+    {
+        return $this->inFlightBytes;
     }
 
     private function completeQueueOnce(): void
@@ -251,5 +267,15 @@ final class JetStreamConsumeHandle implements AckObserverInterface
         if ($this->failure !== null) {
             throw $this->failure;
         }
+    }
+
+    private function shouldAutoTermDroppedMessage(JetStreamMessage $message): bool
+    {
+        $deliveryCount = $message->getDeliveryCount();
+        if ($deliveryCount === null) {
+            return false;
+        }
+
+        return $deliveryCount > self::MAX_DROP_NEW_REDELIVERIES;
     }
 }

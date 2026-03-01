@@ -71,7 +71,10 @@ while (($message = $handle->next(2000)) !== null) {
 Handle lifecycle:
 
 - `stop()` stops new fetches and completes stream (`next()` returns `null` after queue is drained).
-- `drain(timeout)` waits for internal queue to be consumed, then stops.
+- `drain(timeout)` stops new fetches and waits for:
+  - internal queue to become empty
+  - `inFlightMessages` to become `0` (all delivered messages must be released via `ack|nak|term`)
+  If timeout is reached, `JetStreamDrainTimeoutException` is raised.
 - `getState()` returns `RUNNING|STOPPING|DRAINING|STOPPED`.
 
 ## Local Backpressure
@@ -85,6 +88,16 @@ Backpressure is local to consume handle and based on delivered-but-not-released 
   - `DROP_NEW`: extra messages are dropped from delivery to user code.
 
 `DROP_NEW` does **not** auto-ack dropped messages. They remain unacknowledged and may be redelivered by JetStream.
+Guard behavior:
+- if header `Nats-Num-Delivered` is present and value is `> 5`, dropped message is auto-terminated (`+TERM`)
+- if header is absent, guard is not applied
+
+## Reconnect Behavior
+
+- Continuous consume loop is reconnect-aware.
+- Temporary `ConnectionException` / fetch timeout do not terminate loop while handle state is `RUNNING`.
+- After reconnect, loop continues issuing pull requests.
+- In-flight counters are not reset by reconnect; semantics remain at-least-once and redelivery is possible.
 
 ## noWait / expires Semantics
 

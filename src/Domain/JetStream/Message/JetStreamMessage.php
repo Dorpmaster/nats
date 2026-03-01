@@ -15,6 +15,7 @@ final readonly class JetStreamMessage implements JetStreamMessageInterface
         private array $headers,
         private string|null $replyTo,
         private int $sizeBytes,
+        private int|null $deliveryCount = null,
     ) {
     }
 
@@ -41,5 +42,10 @@ final readonly class JetStreamMessage implements JetStreamMessageInterface
     public function getSizeBytes(): int
     {
         return $this->sizeBytes;
+    }
+
+    public function getDeliveryCount(): int|null
+    {
+        return $this->deliveryCount;
     }
 }

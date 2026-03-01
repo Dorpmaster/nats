@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Tests\Unit\JetStream\Pull;
 
+use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamDrainTimeoutException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamSlowConsumerException;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessage;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAcker;
@@ -159,5 +160,64 @@ final class JetStreamConsumeHandleTest extends TestCase
         self::assertSame('m1', $first?->getPayload());
         self::expectException(JetStreamSlowConsumerException::class);
         $handle->next(100);
+    }
+
+    public function testDrainTimesOutWhenInFlightMessageIsNotAcknowledged(): void
+    {
+        // Arrange
+        $acknowledger = $this->createStub(JetStreamMessageAcknowledgerInterface::class);
+        $acker        = new JetStreamMessageAcker($acknowledger);
+        $handle       = new JetStreamConsumeHandle($acker, new PullConsumeOptions(batch: 2, expiresMs: 1000));
+        $first        = new JetStreamMessage('s', 'm1', [], 'r1', 2);
+        $second       = new JetStreamMessage('s', 'm2', [], 'r2', 2);
+        $handle->offer($first);
+        $handle->offer($second);
+        $handle->completeProducer();
+
+        // Act
+        $received = $handle->next(100);
+
+        // Assert
+        self::assertSame('m1', $received?->getPayload());
+        self::expectException(JetStreamDrainTimeoutException::class);
+        $handle->drain(200);
+    }
+
+    public function testDropNewAutoTermsMessageAfterTooManyRedeliveries(): void
+    {
+        // Arrange
+        $acknowledger = $this->createMock(JetStreamMessageAcknowledgerInterface::class);
+        $acknowledger->expects(self::once())
+            ->method('acknowledge')
+            ->with('r2', '+TERM');
+        $acker   = new JetStreamMessageAcker($acknowledger);
+        $options = new PullConsumeOptions(
+            batch: 2,
+            expiresMs: 1000,
+            maxInFlightMessages: 1,
+            maxInFlightBytes: 1024,
+            policy: SlowConsumerPolicy::DROP_NEW,
+        );
+        $handle  = new JetStreamConsumeHandle($acker, $options);
+        $first   = new JetStreamMessage('s', 'm1', [], 'r1', 2, 1);
+        $second  = new JetStreamMessage(
+            's',
+            'm2',
+            ['Nats-Num-Delivered' => '6'],
+            'r2',
+            2,
+            6,
+        );
+        $handle->offer($first);
+        $handle->offer($second);
+        $handle->completeProducer();
+
+        // Act
+        $firstOut  = $handle->next(100);
+        $secondOut = $handle->next(100);
+
+        // Assert
+        self::assertSame('m1', $firstOut?->getPayload());
+        self::assertNull($secondOut);
     }
 }
