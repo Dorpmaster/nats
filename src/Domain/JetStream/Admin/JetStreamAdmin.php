@@ -126,6 +126,13 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
             throw new JetStreamApiException(0, 'JetStream consumer response does not contain durable name');
         }
 
-        return new ConsumerInfo($durableName);
+        $numPending    = isset($response['num_pending']) && is_numeric($response['num_pending'])
+            ? (int) $response['num_pending']
+            : null;
+        $numAckPending = isset($response['num_ack_pending']) && is_numeric($response['num_ack_pending'])
+            ? (int) $response['num_ack_pending']
+            : null;
+
+        return new ConsumerInfo($durableName, $numPending, $numAckPending);
     }
 }

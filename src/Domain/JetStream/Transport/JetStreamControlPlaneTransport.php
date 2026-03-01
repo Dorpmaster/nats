@@ -8,6 +8,7 @@ use Dorpmaster\Nats\Client\SubscriptionIdHelper;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
+use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use JsonException;
 use stdClass;
 
@@ -22,6 +23,16 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamControlP
         SubscriptionIdHelperInterface|null $subscriptionIdHelper = null,
     ) {
         $this->subscriptionIdHelper = $subscriptionIdHelper ?? new SubscriptionIdHelper();
+    }
+
+    public function getClient(): ClientInterface
+    {
+        return $this->client;
+    }
+
+    public function getSubscriptionIdHelper(): SubscriptionIdHelperInterface
+    {
+        return $this->subscriptionIdHelper;
     }
 
     public function request(string $apiSubjectSuffix, array $payload, int|null $timeoutMs = null): array
@@ -65,5 +76,34 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamControlP
         }
 
         return $decoded;
+    }
+
+    public function publishRequest(
+        string $apiSubjectSuffix,
+        array $payload,
+        string $replyTo,
+        array $headers = [],
+    ): void {
+        $subject = self::API_PREFIX . $apiSubjectSuffix;
+        $body    = $payload === [] ? new stdClass() : $payload;
+
+        try {
+            $requestPayload = json_encode($body, JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new JetStreamApiException(0, 'Failed to encode JetStream API request payload as JSON', $exception);
+        }
+
+        if ($headers === []) {
+            $message = new JetStreamRawPubMessage($subject, $requestPayload, $replyTo);
+        } else {
+            $message = new JetStreamControlPlaneHeadersRequestMessage(
+                $subject,
+                $requestPayload,
+                new HeaderBag($headers),
+                $replyTo,
+            );
+        }
+
+        $this->client->publish($message);
     }
 }

@@ -275,6 +275,27 @@ $ack = $publisher->publish(
 
 See [docs/jetstream-publish.md](docs/jetstream-publish.md).
 
+## JetStream Pull (MVP)
+
+JetStream pull consumer supports bounded `fetch()` and explicit ack API through a dedicated message acker service.
+
+Example:
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumerFactory;
+
+$factory = new JetStreamPullConsumerFactory($transport);
+$pull = $factory->create('ORDERS', 'C1');
+$result = $pull->fetch(batch: 10, expiresMs: 2000);
+$acker = $result->getAcker();
+
+foreach ($result->messages() as $message) {
+    $acker->ack($message);
+}
+```
+
+See [docs/jetstream-pull.md](docs/jetstream-pull.md).
+
 ## Testing
 
 ```bash
@@ -308,6 +329,7 @@ make test
 - [docs/tls.md](docs/tls.md)
 - [docs/jetstream-admin.md](docs/jetstream-admin.md)
 - [docs/jetstream-publish.md](docs/jetstream-publish.md)
+- [docs/jetstream-pull.md](docs/jetstream-pull.md)
 
 ## License
 

@@ -1,0 +1,201 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Dorpmaster\Nats\Domain\JetStream\Pull;
+
+use Amp\DeferredFuture;
+use Amp\TimeoutCancellation;
+use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
+use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamClientAcknowledger;
+use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAcker;
+use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAckerInterface;
+use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessage;
+use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAcknowledgerInterface;
+use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageInterface;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInterface;
+use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
+use JsonException;
+
+final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
+{
+    private const int FETCH_TIMEOUT_OVERHEAD_MS = 200;
+
+    private JetStreamMessageAcknowledgerInterface $acknowledger;
+    private JetStreamMessageAckerInterface $messageAcker;
+
+    public function __construct(
+        private readonly JetStreamControlPlaneTransportInterface $transport,
+        private readonly string $stream,
+        private readonly string $consumer,
+        JetStreamMessageAcknowledgerInterface|null $acknowledger = null,
+    ) {
+        $this->acknowledger = $acknowledger ?? new JetStreamClientAcknowledger($this->transport->getClient());
+        $this->messageAcker = new JetStreamMessageAcker($this->acknowledger);
+    }
+
+    public function fetch(
+        int $batch,
+        int $expiresMs,
+        bool $noWait = false,
+        int|null $maxBytes = null,
+        int|null $idleHeartbeatMs = null,
+    ): JetStreamFetchResult {
+        if ($batch <= 0) {
+            throw new \InvalidArgumentException('batch must be greater than zero');
+        }
+
+        if ($expiresMs <= 0) {
+            throw new \InvalidArgumentException('expiresMs must be greater than zero');
+        }
+
+        $inbox             = 'INBOX.' . $this->transport->getSubscriptionIdHelper()->generateId();
+        $messages          = [];
+        $deferredCompleted = new DeferredFuture();
+        $fetchError        = null;
+        $result            = null;
+
+        $sid = $this->transport->getClient()->subscribe($inbox, function (NatsProtocolMessageInterface $message) use (&$messages, $batch, $deferredCompleted, &$fetchError): null {
+            try {
+                $jetStreamMessage = $this->toJetStreamMessage($message);
+                if ($jetStreamMessage === null) {
+                    return null;
+                }
+
+                $messages[] = $jetStreamMessage;
+
+                if (count($messages) >= $batch && !$deferredCompleted->isComplete()) {
+                    $deferredCompleted->complete(true);
+                }
+            } catch (JetStreamApiException $exception) {
+                $fetchError = $exception;
+
+                if (!$deferredCompleted->isComplete()) {
+                    $deferredCompleted->complete(false);
+                }
+            }
+
+            return null;
+        });
+
+        try {
+            $requestPayload = [
+                'batch' => $batch,
+                'expires' => $expiresMs * 1_000_000,
+                'no_wait' => $noWait,
+            ];
+
+            if ($maxBytes !== null) {
+                $requestPayload['max_bytes'] = $maxBytes;
+            }
+
+            if ($idleHeartbeatMs !== null) {
+                $requestPayload['idle_heartbeat'] = $idleHeartbeatMs * 1_000_000;
+            }
+
+            $this->transport->publishRequest(
+                sprintf('CONSUMER.MSG.NEXT.%s.%s', $this->stream, $this->consumer),
+                $requestPayload,
+                $inbox,
+            );
+
+            if ($noWait) {
+                if ($fetchError instanceof JetStreamApiException) {
+                    throw $fetchError;
+                }
+
+                $result = new JetStreamFetchResult($messages, $this->messageAcker);
+            } else {
+                $timedOut     = false;
+                $cancellation = new TimeoutCancellation(($expiresMs + self::FETCH_TIMEOUT_OVERHEAD_MS) / 1000);
+                $cid          = $cancellation->subscribe(static function () use (&$timedOut, $deferredCompleted): void {
+                    $timedOut = true;
+                    if (!$deferredCompleted->isComplete()) {
+                        $deferredCompleted->complete(false);
+                    }
+                });
+
+                try {
+                    $deferredCompleted->getFuture()->await();
+                } finally {
+                    $cancellation->unsubscribe($cid);
+                }
+
+                if ($fetchError instanceof JetStreamApiException) {
+                    throw $fetchError;
+                }
+
+                $result = new JetStreamFetchResult($messages, $this->messageAcker);
+            }
+        } finally {
+            $this->transport->getClient()->unsubscribe($sid);
+        }
+
+        if ($result === null) {
+            throw new \LogicException('JetStream fetch result was not produced');
+        }
+
+        return $result;
+    }
+
+    private function toJetStreamMessage(NatsProtocolMessageInterface $message): JetStreamMessageInterface|null
+    {
+        if (!($message instanceof MsgMessageInterface || $message instanceof HMsgMessageInterface)) {
+            return null;
+        }
+
+        if (!method_exists($message, 'getPayload')) {
+            return null;
+        }
+
+        $payload = $message->getPayload();
+        $replyTo = $message->getReplyTo();
+
+        if ($replyTo === null || $replyTo === '') {
+            $this->throwIfJsonErrorPayload($payload);
+            return null;
+        }
+
+        $headers = [];
+        if ($message instanceof HMsgMessageInterface) {
+            foreach ($message->getHeaders() as $name => $values) {
+                if (is_array($values)) {
+                    $headers[$name] = (string) reset($values);
+                } else {
+                    $headers[$name] = (string) $values;
+                }
+            }
+        }
+
+        return new JetStreamMessage(
+            subject: $message->getSubject(),
+            payload: $payload,
+            headers: $headers,
+            replyTo: $replyTo,
+        );
+    }
+
+    private function throwIfJsonErrorPayload(string $payload): void
+    {
+        try {
+            $decoded = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return;
+        }
+
+        if (!is_array($decoded) || !isset($decoded['error']) || !is_array($decoded['error'])) {
+            return;
+        }
+
+        $code        = (int) ($decoded['error']['code'] ?? 500);
+        $description = (string) ($decoded['error']['description'] ?? 'JetStream pull fetch error');
+
+        if ($code === 404) {
+            return;
+        }
+
+        throw new JetStreamApiException($code, $description);
+    }
+}
