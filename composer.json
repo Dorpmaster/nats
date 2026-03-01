@@ -67,6 +67,9 @@
         "integration:cluster:tls": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/ClientClusterTlsFailoverIntegrationTest.php"
         ],
+        "integration:jetstream": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/JetStreamAdminIntegrationTest.php"
+        ],
         "test": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Full"
         ],

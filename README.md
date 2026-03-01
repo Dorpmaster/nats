@@ -238,12 +238,26 @@ Configured in `ClientConfiguration`:
 - Memory usage is bounded only if your configured limits are bounded.
 - `drain()` is graceful but bounded by timeout and network state.
 
+## JetStream Admin (MVP)
+
+JetStream administrative API is available through the control-plane transport (`$JS.API.*`).
+
+Supported operations:
+
+- create/get/delete stream
+- create-or-update/get/delete pull consumer metadata
+
+Current scope is admin only (no JetStream publish/data-plane consumer implementation in this module).
+
+See [docs/jetstream-admin.md](docs/jetstream-admin.md).
+
 ## Testing
 
 ```bash
 make phpunit
 make integration
 make integration-tls
+make integration-jetstream
 make integration-cluster
 make integration-cluster-tls
 make test
@@ -268,6 +282,7 @@ make test
 - [docs/health.md](docs/health.md)
 - [docs/drain.md](docs/drain.md)
 - [docs/tls.md](docs/tls.md)
+- [docs/jetstream-admin.md](docs/jetstream-admin.md)
 
 ## License
 
