@@ -70,6 +70,12 @@
         "integration:jetstream": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/JetStreamAdminIntegrationTest.php tests/Integration/JetStreamPublishIntegrationTest.php tests/Integration/JetStreamPullConsumerIntegrationTest.php tests/Integration/JetStreamPullConsumeIntegrationTest.php"
         ],
+        "integration:jetstream:cluster": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/JetStreamClusterReconnectIntegrationTest.php"
+        ],
+        "integration:jetstream:cluster:tls": [
+            "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml tests/Integration/JetStreamClusterTlsReconnectIntegrationTest.php"
+        ],
         "test": [
             "php -d pcov.enabled=1 -d memory_limit=-1 vendor/bin/phpunit --configuration phpunit.xml --testsuite Full"
         ],

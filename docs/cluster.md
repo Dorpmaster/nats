@@ -30,7 +30,12 @@ Incoming `INFO` frames may include `connect_urls`. Valid entries are converted t
 
 `deadServerCooldownMs` controls temporary exclusion of failed servers. After cooldown expiration, server can be selected again.
 
+## JetStream
+
+- JetStream publisher and pull workflows can run over the same cluster failover path.
+- For resilient stream availability under node failure, configure stream replication (`num_replicas`) to at least `2` (tests use `3`).
+- Pull consume loop is reconnect-aware; delivery remains at-least-once.
+
 ## Limitations
 
-- Core NATS only (no JetStream workflow in reconnect logic).
 - At-least-once behavior during reconnect windows can produce duplicate publishes.

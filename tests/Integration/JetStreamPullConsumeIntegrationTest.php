@@ -29,6 +29,8 @@ use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
 use PHPUnit\Framework\TestCase;
 
+use function Amp\delay;
+
 final class JetStreamPullConsumeIntegrationTest extends TestCase
 {
     public static function setUpBeforeClass(): void
@@ -235,6 +237,9 @@ final class JetStreamPullConsumeIntegrationTest extends TestCase
             // Arrange
             $acker = $handle->getAcker();
             $acker->ack($first);
+            $second = $handle->next(2000);
+            self::assertNotNull($second);
+            $acker->ack($second);
 
             // Act
             $handle->drain(2000);
@@ -385,7 +390,7 @@ final class JetStreamPullConsumeIntegrationTest extends TestCase
                 return;
             }
 
-            usleep(50_000);
+            delay(0.05);
         }
 
         self::fail('Client did not reconnect to CONNECTED state in expected timeout');

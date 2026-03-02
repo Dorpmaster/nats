@@ -247,8 +247,6 @@ Supported operations:
 - create/get/delete stream
 - create-or-update/get/delete pull consumer metadata
 
-Current scope is admin only (no JetStream publish/data-plane consumer implementation in this module).
-
 See [docs/jetstream-admin.md](docs/jetstream-admin.md).
 
 ## JetStream Publisher (MVP)
@@ -313,6 +311,16 @@ Notes:
 
 See [docs/jetstream-pull.md](docs/jetstream-pull.md).
 
+## JetStream Reconnect, Cluster, TLS
+
+JetStream publisher and pull workflows are covered by reconnect/failover integration suites:
+
+- single-node JetStream reconnect handling
+- JetStream cluster failover (3-node, replicated streams)
+- JetStream cluster + TLS failover (`verifyPeer`, CA, optional mTLS)
+
+See [docs/jetstream-reconnect.md](docs/jetstream-reconnect.md).
+
 ## Testing
 
 ```bash
@@ -320,6 +328,8 @@ make phpunit
 make integration
 make integration-tls
 make integration-jetstream
+make integration-jetstream-cluster
+make integration-jetstream-cluster-tls
 make integration-cluster
 make integration-cluster-tls
 make test
@@ -347,6 +357,7 @@ make test
 - [docs/jetstream-admin.md](docs/jetstream-admin.md)
 - [docs/jetstream-publish.md](docs/jetstream-publish.md)
 - [docs/jetstream-pull.md](docs/jetstream-pull.md)
+- [docs/jetstream-reconnect.md](docs/jetstream-reconnect.md)
 
 ## License
 

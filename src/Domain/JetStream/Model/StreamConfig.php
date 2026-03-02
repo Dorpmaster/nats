@@ -13,6 +13,7 @@ final readonly class StreamConfig
         private string $name,
         private array $subjects,
         private string|null $storage = null,
+        private int|null $replicas = null,
     ) {
     }
 
@@ -32,6 +33,11 @@ final readonly class StreamConfig
         return $this->storage;
     }
 
+    public function getReplicas(): int|null
+    {
+        return $this->replicas;
+    }
+
     public function toRequestPayload(): array
     {
         $payload = [
@@ -41,6 +47,10 @@ final readonly class StreamConfig
 
         if ($this->storage !== null) {
             $payload['storage'] = $this->storage;
+        }
+
+        if ($this->replicas !== null) {
+            $payload['num_replicas'] = $this->replicas;
         }
 
         return $payload;

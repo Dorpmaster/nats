@@ -16,6 +16,8 @@ use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessage;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAckerInterface;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageInterface;
 
+use function Amp\delay;
+
 final class JetStreamConsumeHandle implements AckObserverInterface
 {
     private const int INTERNAL_QUEUE_CAPACITY  = 1_000_000;
@@ -140,7 +142,7 @@ final class JetStreamConsumeHandle implements AckObserverInterface
                 throw new JetStreamDrainTimeoutException();
             }
 
-            usleep(1_000);
+            delay(0.001);
         }
 
         $this->stop();

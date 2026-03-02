@@ -37,6 +37,13 @@ $client = new ClientConfiguration(
 - Reconnect/failover uses server pool with dead cooldown.
 - Resubscribe is performed after reconnect.
 - With `bufferWhileReconnecting=true`, outbound queue can survive short node outage.
+- JetStream workflows (publisher/pull) use the same reconnect/failover transport path.
+
+## JetStream Under TLS
+
+- For stable failover in JetStream, use replicated streams (`num_replicas >= 2`, tests use `3`).
+- Pull consume loop remains reconnect-aware under TLS.
+- `verifyPeer` must succeed for every target node selected by failover.
 
 ## Typical Misconfigurations
 
