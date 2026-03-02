@@ -88,6 +88,70 @@ $client->unsubscribe($sid);
 $client->disconnect();
 ```
 
+## Docker Examples
+
+Default container command runs Core worker example:
+
+```bash
+docker build -t nats-php-driver .
+docker run --rm --network <your-network> -e NATS_HOST=nats nats-php-driver
+```
+
+Run JetStream worker example by overriding command:
+
+```bash
+docker run --rm --network <your-network> \
+  -e NATS_HOST=nats \
+  -e NATS_PORT=4222 \
+  nats-php-driver php ./bin/jetstream_worker.php
+```
+
+Run local JetStream test server (from this repository) and execute JetStream example in same network:
+
+```bash
+docker compose -f docker/compose.nats.jetstream.test.yml --project-name nats-js-it up -d --wait
+docker run --rm --network nats-client-jetstream-test-network \
+  -e NATS_HOST=nats-js \
+  -e NATS_PORT=4222 \
+  nats-php-driver php ./bin/jetstream_worker.php
+```
+
+Core worker environment variables:
+
+- `NATS_HOST` (default `nats`)
+- `NATS_PORT` (default `4222`)
+- `NATS_CONNECT_TIMEOUT_MS` (default `1000`)
+- `NATS_LOG_LEVEL` (`debug|info|warning|error`, default `info`)
+- `NATS_SUBJECT` (default `demo.jobs`)
+- `NATS_REPLY_PAYLOAD` (default `ok`)
+- `NATS_PUBLISH_EVERY_MS` (default `0`, disabled)
+- `NATS_PUBLISH_PAYLOAD` (default `demo-message`)
+- `NATS_RECONNECT_ENABLED` (default `1`)
+- `NATS_RECONNECT_ATTEMPTS` (default `10`, `-1`/`null` for infinite)
+- `NATS_RECONNECT_BACKOFF_INITIAL_MS` (default `50`)
+- `NATS_RECONNECT_BACKOFF_MAX_MS` (default `1000`)
+- `NATS_RECONNECT_BACKOFF_MULTIPLIER` (default `2.0`)
+- `NATS_RECONNECT_JITTER` (default `0.2`)
+- `NATS_RECONNECT_SERVERS` (CSV `host:port`, default empty)
+
+JetStream worker environment variables:
+
+- `JS_HOST` / `JS_PORT` (fallback to `NATS_HOST` / `NATS_PORT`)
+- `JS_STREAM` (default `ORDERS`)
+- `JS_SUBJECTS` (CSV, default `orders.*`)
+- `JS_CONSUMER` (default `C1`)
+- `JS_FILTER_SUBJECT` (default `orders.created`)
+- `JS_PUBLISH_SUBJECT` (default equals `JS_FILTER_SUBJECT`)
+- `JS_PUBLISH_COUNT` (default `10`)
+- `JS_PUBLISH_PREFIX` (default `hello-`)
+- `JS_CONSUME_MAX` (default `10`, `<=0` means unlimited)
+- `JS_CONSUME_BATCH` (default `10`)
+- `JS_CONSUME_EXPIRES_MS` (default `1000`)
+- `JS_CONSUME_NO_WAIT` (default `0`)
+- `JS_CONSUME_MAX_IN_FLIGHT_MESSAGES` (default `100`)
+- `JS_CONSUME_MAX_IN_FLIGHT_BYTES` (default `5000000`)
+- `JS_SLOW_CONSUMER_POLICY` (`error|drop_new`, default `error`)
+
 ## Cluster Example
 
 ```php
@@ -238,12 +302,116 @@ Configured in `ClientConfiguration`:
 - Memory usage is bounded only if your configured limits are bounded.
 - `drain()` is graceful but bounded by timeout and network state.
 
+## JetStream Admin (MVP)
+
+JetStream administrative API is available through the control-plane transport (`$JS.API.*`).
+
+Supported operations:
+
+- create/get/delete stream
+- create-or-update/get/delete pull consumer metadata
+
+See [docs/jetstream-admin.md](docs/jetstream-admin.md).
+
+## JetStream Publisher (MVP)
+
+JetStream publisher sends payload to stream subjects and expects `PubAck` response from the server.
+
+- payload is sent as binary data
+- PubAck is parsed from JSON response
+- supports dedup and expectations via publish headers
+
+Example:
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Publish\JetStreamPublisher;
+use Dorpmaster\Nats\Domain\JetStream\Publish\PublishOptions;
+
+$publisher = new JetStreamPublisher($client);
+$ack = $publisher->publish(
+    'orders.created',
+    'hello',
+    PublishOptions::create(msgId: 'orders-1'),
+);
+```
+
+See [docs/jetstream-publish.md](docs/jetstream-publish.md).
+
+## JetStream Pull (MVP + Continuous Loop)
+
+JetStream pull consumer supports bounded `fetch()` and continuous `consume()` loop with local backpressure controls.
+
+Example:
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumerFactory;
+
+$factory = new JetStreamPullConsumerFactory($transport);
+$pull = $factory->create('ORDERS', 'C1');
+$result = $pull->fetch(batch: 10, expiresMs: 2000);
+$acker = $result->getAcker();
+
+foreach ($result->messages() as $message) {
+    $acker->ack($message);
+}
+```
+
+Continuous loop example:
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Pull\PullConsumeOptions;
+
+$handle = $pull->consume(new PullConsumeOptions(batch: 10, expiresMs: 1000));
+$acker = $handle->getAcker();
+
+while (($message = $handle->next(2000)) !== null) {
+    $acker->ack($message);
+}
+```
+
+Notes:
+- `drain(timeout)` waits for both internal queue empty and `inFlight=0`; unacked messages will cause timeout.
+- Under `DROP_NEW`, redelivery can happen; if `Nats-Num-Delivered > 5` header is present, dropped message is auto-terminated (`+TERM`).
+
+See [docs/jetstream-pull.md](docs/jetstream-pull.md).
+
+## JetStream Reconnect, Cluster, TLS
+
+JetStream publisher and pull workflows are covered by reconnect/failover integration suites:
+
+- single-node JetStream reconnect handling
+- JetStream cluster failover (3-node, replicated streams)
+- JetStream cluster + TLS failover (`verifyPeer`, CA, optional mTLS)
+
+See [docs/jetstream-reconnect.md](docs/jetstream-reconnect.md).
+
+## JetStream Logging (PSR-3)
+
+JetStream services accept optional PSR-3 logger dependencies. If logger is omitted, `NullLogger` is used.
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Admin\JetStreamAdmin;
+use Dorpmaster\Nats\Domain\JetStream\Publish\JetStreamPublisher;
+use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumerFactory;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
+
+$logger = new YourPsrLogger();
+
+$transport = new JetStreamControlPlaneTransport($client, logger: $logger);
+$admin = new JetStreamAdmin($transport, $logger);
+$publisher = new JetStreamPublisher($client, $logger);
+$pullFactory = new JetStreamPullConsumerFactory($transport, logger: $logger);
+```
+
 ## Testing
 
 ```bash
 make phpunit
 make integration
 make integration-tls
+make integration-jetstream
+make integration-jetstream-cluster
+make integration-jetstream-cluster-tls
 make integration-cluster
 make integration-cluster-tls
 make test
@@ -268,6 +436,10 @@ make test
 - [docs/health.md](docs/health.md)
 - [docs/drain.md](docs/drain.md)
 - [docs/tls.md](docs/tls.md)
+- [docs/jetstream-admin.md](docs/jetstream-admin.md)
+- [docs/jetstream-publish.md](docs/jetstream-publish.md)
+- [docs/jetstream-pull.md](docs/jetstream-pull.md)
+- [docs/jetstream-reconnect.md](docs/jetstream-reconnect.md)
 
 ## License
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Tests\Support;
 
+use function Amp\delay;
+
 final class NatsServerHarness
 {
     private const string DEFAULT_DOCKER_SOCKET = '/var/run/docker.sock';
@@ -38,7 +40,7 @@ final class NatsServerHarness
             }
 
             $lastErr = sprintf('[%d] %s', $errno, $errstr);
-            usleep($pollStepMilliseconds * 1000);
+            delay($pollStepMilliseconds / 1000);
         }
 
         throw new \RuntimeException(sprintf(
@@ -65,7 +67,7 @@ final class NatsServerHarness
             }
 
             fclose($socket);
-            usleep($pollStepMilliseconds * 1000);
+            delay($pollStepMilliseconds / 1000);
         }
 
         throw new \RuntimeException(sprintf(

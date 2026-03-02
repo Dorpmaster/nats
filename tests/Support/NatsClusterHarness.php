@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Tests\Support;
 
+use function Amp\delay;
+
 final class NatsClusterHarness
 {
     private const string DEFAULT_DOCKER_SOCKET = '/var/run/docker.sock';
@@ -44,7 +46,7 @@ final class NatsClusterHarness
                 $lastErr = sprintf('[%d] %s', $errno, $errstr);
             }
 
-            usleep($pollStepMilliseconds * 1000);
+            delay($pollStepMilliseconds / 1000);
         }
 
         throw new \RuntimeException(sprintf(
@@ -99,7 +101,7 @@ final class NatsClusterHarness
                 if (!is_string($line) || !str_starts_with($line, 'INFO ')) {
                     fclose($socket);
                     $lastError = sprintf('TCP connected, but INFO preface not received (line="%s")', trim((string) $line));
-                    usleep($pollStepMilliseconds * 1000);
+                    delay($pollStepMilliseconds / 1000);
 
                     continue;
                 }
@@ -116,7 +118,7 @@ final class NatsClusterHarness
                 $lastError = sprintf('[%d] %s', $errno, $errstr);
             }
 
-            usleep($pollStepMilliseconds * 1000);
+            delay($pollStepMilliseconds / 1000);
         }
 
         throw new \RuntimeException(sprintf(
@@ -144,7 +146,7 @@ final class NatsClusterHarness
             }
 
             fclose($socket);
-            usleep($pollStepMilliseconds * 1000);
+            delay($pollStepMilliseconds / 1000);
         }
 
         throw new \RuntimeException(sprintf(

@@ -13,6 +13,15 @@ NATS_NETWORK := nats-client-test-network
 NATS_TLS_COMPOSE_FILE := docker/compose.nats.tls.test.yml
 NATS_TLS_PROJECT := nats-it-tls
 NATS_TLS_NETWORK := nats-client-tls-test-network
+NATS_JS_COMPOSE_FILE := docker/compose.nats.jetstream.test.yml
+NATS_JS_PROJECT := nats-js-it
+NATS_JS_NETWORK := nats-client-jetstream-test-network
+NATS_JS_CLUSTER_COMPOSE_FILE := docker/compose.nats.jetstream.cluster.test.yml
+NATS_JS_CLUSTER_PROJECT := nats-js-cluster-it
+NATS_JS_CLUSTER_NETWORK := nats-client-jetstream-cluster-test-network
+NATS_JS_CLUSTER_TLS_COMPOSE_FILE := docker/compose.nats.jetstream.cluster.tls.test.yml
+NATS_JS_CLUSTER_TLS_PROJECT := nats-js-cluster-tls-it
+NATS_JS_CLUSTER_TLS_NETWORK := nats-client-jetstream-cluster-tls-test-network
 NATS_CLUSTER_COMPOSE_FILE := docker/compose.nats.cluster.test.yml
 NATS_CLUSTER_PROJECT := nats-cluster-it
 NATS_CLUSTER_NETWORK := nats-client-cluster-test-network
@@ -22,12 +31,19 @@ NATS_CLUSTER_TLS_NETWORK := nats-client-cluster-tls-test-network
 DOCKER_SOCKET_HOST := $(shell if [ -S /var/run/docker.sock ]; then echo /var/run/docker.sock; elif [ -S $$HOME/.docker/run/docker.sock ]; then echo $$HOME/.docker/run/docker.sock; fi)
 NATS_CONTAINER := $(NATS_PROJECT)-nats-1
 NATS_TLS_CONTAINER := $(NATS_TLS_PROJECT)-nats-1
+NATS_JS_CONTAINER := $(NATS_JS_PROJECT)-nats-js-1
 NATS_CLUSTER_N1_CONTAINER := $(NATS_CLUSTER_PROJECT)-n1-1
 NATS_CLUSTER_N2_CONTAINER := $(NATS_CLUSTER_PROJECT)-n2-1
 NATS_CLUSTER_N3_CONTAINER := $(NATS_CLUSTER_PROJECT)-n3-1
 NATS_CLUSTER_TLS_N1_CONTAINER := $(NATS_CLUSTER_TLS_PROJECT)-n1-1
 NATS_CLUSTER_TLS_N2_CONTAINER := $(NATS_CLUSTER_TLS_PROJECT)-n2-1
 NATS_CLUSTER_TLS_N3_CONTAINER := $(NATS_CLUSTER_TLS_PROJECT)-n3-1
+NATS_JS_CLUSTER_N1_CONTAINER := $(NATS_JS_CLUSTER_PROJECT)-n1-1
+NATS_JS_CLUSTER_N2_CONTAINER := $(NATS_JS_CLUSTER_PROJECT)-n2-1
+NATS_JS_CLUSTER_N3_CONTAINER := $(NATS_JS_CLUSTER_PROJECT)-n3-1
+NATS_JS_CLUSTER_TLS_N1_CONTAINER := $(NATS_JS_CLUSTER_TLS_PROJECT)-n1-1
+NATS_JS_CLUSTER_TLS_N2_CONTAINER := $(NATS_JS_CLUSTER_TLS_PROJECT)-n2-1
+NATS_JS_CLUSTER_TLS_N3_CONTAINER := $(NATS_JS_CLUSTER_TLS_PROJECT)-n3-1
 # ...and turn them into do-nothing targets
 $(eval $(RUN_ARGS):;@:)
 
@@ -77,6 +93,20 @@ nats-tls-down:
 	docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans
 	if docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then \
 		docker network rm $(NATS_TLS_NETWORK) || true; \
+	fi
+
+.PHONY: js-up
+js-up:
+	if ! docker network inspect $(NATS_JS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_JS_NETWORK); \
+	fi
+	docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) up -d --wait --remove-orphans
+
+.PHONY: js-down
+js-down:
+	docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) down --timeout=0 --volumes --remove-orphans
+	if docker network inspect $(NATS_JS_NETWORK) >/dev/null 2>&1; then \
+		docker network rm $(NATS_JS_NETWORK) || true; \
 	fi
 
 .PHONY: cluster-up
@@ -193,6 +223,26 @@ integration-tls: build
 		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
 		nats-client composer integration:tls
 
+.PHONY: integration-jetstream
+integration-jetstream: build
+	set -e
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
+	trap 'docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_NETWORK) || true; fi' EXIT
+	if ! docker network inspect $(NATS_JS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_JS_NETWORK); \
+	fi
+	docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) up -d --wait --remove-orphans
+	docker run --rm --interactive \
+		--user root \
+		--network=$(NATS_JS_NETWORK) \
+		--env NATS_JS=1 \
+		--env NATS_HOST=nats-js \
+		--env NATS_PORT=4222 \
+		--env NATS_CONTAINER=$(NATS_JS_CONTAINER) \
+		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
+		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
+		nats-client composer integration:jetstream
+
 .PHONY: integration-cluster
 integration-cluster: build
 	set -e
@@ -263,3 +313,79 @@ phpcs-fix-file: build
 		--volume $(PWD):/app \
 		--workdir /app \
     	nats-client composer phpcs:fix:file $(RUN_ARGS)
+
+.PHONY: js-cluster-up
+js-cluster-up:
+	if ! docker network inspect $(NATS_JS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_JS_CLUSTER_NETWORK); \
+	fi
+	docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) up -d --wait --remove-orphans
+
+.PHONY: js-cluster-down
+js-cluster-down:
+	docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans
+	if docker network inspect $(NATS_JS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
+		docker network rm $(NATS_JS_CLUSTER_NETWORK) || true; \
+	fi
+
+.PHONY: js-cluster-tls-up
+js-cluster-tls-up:
+	if ! docker network inspect $(NATS_JS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_JS_CLUSTER_TLS_NETWORK); \
+	fi
+	docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans
+
+.PHONY: js-cluster-tls-down
+js-cluster-tls-down:
+	docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans
+	if docker network inspect $(NATS_JS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network rm $(NATS_JS_CLUSTER_TLS_NETWORK) || true; \
+	fi
+
+.PHONY: integration-jetstream-cluster
+integration-jetstream-cluster: build
+	set -e
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
+	trap 'docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_CLUSTER_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_CLUSTER_NETWORK) || true; fi' EXIT
+	if ! docker network inspect $(NATS_JS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_JS_CLUSTER_NETWORK); \
+	fi
+	docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) up -d --wait --remove-orphans
+	docker run --rm --interactive \
+		--user root \
+		--network=$(NATS_JS_CLUSTER_NETWORK) \
+		--env NATS_JS_CLUSTER=1 \
+		--env NATS_HOST=n1 \
+		--env NATS_PORT=4222 \
+		--env NATS_CLUSTER_N1_CONTAINER=$(NATS_JS_CLUSTER_N1_CONTAINER) \
+		--env NATS_CLUSTER_N2_CONTAINER=$(NATS_JS_CLUSTER_N2_CONTAINER) \
+		--env NATS_CLUSTER_N3_CONTAINER=$(NATS_JS_CLUSTER_N3_CONTAINER) \
+		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
+		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
+		nats-client composer integration:jetstream:cluster
+
+.PHONY: integration-jetstream-cluster-tls
+integration-jetstream-cluster-tls: build
+	set -e
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
+	trap 'docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_CLUSTER_TLS_NETWORK) || true; fi' EXIT
+	if ! docker network inspect $(NATS_JS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
+		docker network create $(NATS_JS_CLUSTER_TLS_NETWORK); \
+	fi
+	docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans
+	docker run --rm --interactive \
+		--user root \
+		--network=$(NATS_JS_CLUSTER_TLS_NETWORK) \
+		--env NATS_JS_CLUSTER_TLS=1 \
+		--env NATS_CLUSTER_TLS=1 \
+		--env NATS_HOST=n1 \
+		--env NATS_PORT=4222 \
+		--env NATS_CLUSTER_TLS_N1_CONTAINER=$(NATS_JS_CLUSTER_TLS_N1_CONTAINER) \
+		--env NATS_CLUSTER_TLS_N2_CONTAINER=$(NATS_JS_CLUSTER_TLS_N2_CONTAINER) \
+		--env NATS_CLUSTER_TLS_N3_CONTAINER=$(NATS_JS_CLUSTER_TLS_N3_CONTAINER) \
+		--env NATS_CLUSTER_TLS_CA=/app/tests/Support/tls/cluster/ca.pem \
+		--env NATS_CLUSTER_TLS_CLIENT_CERT=/app/tests/Support/tls/cluster/client.pem \
+		--env NATS_CLUSTER_TLS_CLIENT_KEY=/app/tests/Support/tls/cluster/client-key.pem \
+		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
+		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
+		nats-client composer integration:jetstream:cluster:tls
