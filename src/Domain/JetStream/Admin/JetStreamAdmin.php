@@ -10,71 +10,170 @@ use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerInfo;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamInfo;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 final readonly class JetStreamAdmin implements JetStreamAdminInterface
 {
     public function __construct(
         private JetStreamControlPlaneTransportInterface $transport,
+        private LoggerInterface|null $logger = null,
     ) {
     }
 
     public function createStream(StreamConfig $config): StreamInfo
     {
-        $response = $this->transport->request(
-            sprintf('STREAM.CREATE.%s', $config->getName()),
-            $config->toRequestPayload(),
-        );
+        $this->getLogger()->info('js.admin.stream.create', [
+            'stream' => $config->getName(),
+            'subjects' => count($config->getSubjects()),
+        ]);
 
-        return $this->mapStreamInfo($response);
+        try {
+            $response = $this->transport->request(
+                sprintf('STREAM.CREATE.%s', $config->getName()),
+                $config->toRequestPayload(),
+            );
+        } catch (\Throwable $exception) {
+            $this->getLogger()->warning('js.admin.stream.create.failed', [
+                'stream' => $config->getName(),
+                'error' => $exception::class,
+            ]);
+
+            throw $exception;
+        }
+
+        $info = $this->mapStreamInfo($response);
+        $this->getLogger()->debug('js.admin.stream.create.success', [
+            'stream' => $info->getName(),
+            'subjects' => count($info->getSubjects()),
+        ]);
+
+        return $info;
     }
 
     public function getStreamInfo(string $stream): StreamInfo
     {
-        $response = $this->transport->request(
-            sprintf('STREAM.INFO.%s', $stream),
-            [],
-        );
+        $this->getLogger()->debug('js.admin.stream.info', [
+            'stream' => $stream,
+        ]);
+
+        try {
+            $response = $this->transport->request(
+                sprintf('STREAM.INFO.%s', $stream),
+                [],
+            );
+        } catch (\Throwable $exception) {
+            $this->getLogger()->warning('js.admin.stream.info.failed', [
+                'stream' => $stream,
+                'error' => $exception::class,
+            ]);
+
+            throw $exception;
+        }
 
         return $this->mapStreamInfo($response);
     }
 
     public function deleteStream(string $stream): void
     {
-        $this->transport->request(
-            sprintf('STREAM.DELETE.%s', $stream),
-            [],
-        );
+        $this->getLogger()->info('js.admin.stream.delete', [
+            'stream' => $stream,
+        ]);
+        try {
+            $this->transport->request(
+                sprintf('STREAM.DELETE.%s', $stream),
+                [],
+            );
+        } catch (\Throwable $exception) {
+            $this->getLogger()->warning('js.admin.stream.delete.failed', [
+                'stream' => $stream,
+                'error' => $exception::class,
+            ]);
+
+            throw $exception;
+        }
     }
 
     public function createOrUpdateConsumer(string $stream, ConsumerConfig $config): ConsumerInfo
     {
-        $response = $this->transport->request(
-            sprintf('CONSUMER.CREATE.%s.%s', $stream, $config->getDurableName()),
-            [
-                'stream_name' => $stream,
-                'config' => $config->toRequestPayload(),
-            ],
-        );
+        $this->getLogger()->info('js.admin.consumer.create', [
+            'stream' => $stream,
+            'consumer' => $config->getDurableName(),
+        ]);
 
-        return $this->mapConsumerInfo($response);
+        try {
+            $response = $this->transport->request(
+                sprintf('CONSUMER.CREATE.%s.%s', $stream, $config->getDurableName()),
+                [
+                    'stream_name' => $stream,
+                    'config' => $config->toRequestPayload(),
+                ],
+            );
+        } catch (\Throwable $exception) {
+            $this->getLogger()->warning('js.admin.consumer.create.failed', [
+                'stream' => $stream,
+                'consumer' => $config->getDurableName(),
+                'error' => $exception::class,
+            ]);
+
+            throw $exception;
+        }
+
+        $info = $this->mapConsumerInfo($response);
+        $this->getLogger()->debug('js.admin.consumer.create.success', [
+            'stream' => $stream,
+            'consumer' => $info->getDurableName(),
+        ]);
+
+        return $info;
     }
 
     public function getConsumerInfo(string $stream, string $consumer): ConsumerInfo
     {
-        $response = $this->transport->request(
-            sprintf('CONSUMER.INFO.%s.%s', $stream, $consumer),
-            [],
-        );
+        $this->getLogger()->debug('js.admin.consumer.info', [
+            'stream' => $stream,
+            'consumer' => $consumer,
+        ]);
+
+        try {
+            $response = $this->transport->request(
+                sprintf('CONSUMER.INFO.%s.%s', $stream, $consumer),
+                [],
+            );
+        } catch (\Throwable $exception) {
+            $this->getLogger()->warning('js.admin.consumer.info.failed', [
+                'stream' => $stream,
+                'consumer' => $consumer,
+                'error' => $exception::class,
+            ]);
+
+            throw $exception;
+        }
 
         return $this->mapConsumerInfo($response);
     }
 
     public function deleteConsumer(string $stream, string $consumer): void
     {
-        $this->transport->request(
-            sprintf('CONSUMER.DELETE.%s.%s', $stream, $consumer),
-            [],
-        );
+        $this->getLogger()->info('js.admin.consumer.delete', [
+            'stream' => $stream,
+            'consumer' => $consumer,
+        ]);
+
+        try {
+            $this->transport->request(
+                sprintf('CONSUMER.DELETE.%s.%s', $stream, $consumer),
+                [],
+            );
+        } catch (\Throwable $exception) {
+            $this->getLogger()->warning('js.admin.consumer.delete.failed', [
+                'stream' => $stream,
+                'consumer' => $consumer,
+                'error' => $exception::class,
+            ]);
+
+            throw $exception;
+        }
     }
 
     /** @param array<string, mixed> $response */
@@ -134,5 +233,10 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
             : null;
 
         return new ConsumerInfo($durableName, $numPending, $numAckPending);
+    }
+
+    private function getLogger(): LoggerInterface
+    {
+        return $this->logger ?? new NullLogger();
     }
 }

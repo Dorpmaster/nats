@@ -49,3 +49,15 @@ Publisher follows core client reconnect semantics:
 - delivery is at-least-once under reconnect windows
 - ack can be lost on network failures
 - `msgId` is recommended to reduce duplicate effects
+
+## Logging
+
+`JetStreamPublisher` accepts optional `Psr\Log\LoggerInterface`.
+If logger is not provided, `NullLogger` is used.
+
+Event keys:
+- `js.publish.start`
+- `js.publish.retry`
+- `js.publish.ack`
+- `js.publish.timeout`
+- `js.publish.error`

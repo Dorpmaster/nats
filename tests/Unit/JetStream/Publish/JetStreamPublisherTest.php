@@ -12,7 +12,9 @@ use Dorpmaster\Nats\Domain\JetStream\Publish\JetStreamPublisher;
 use Dorpmaster\Nats\Domain\JetStream\Publish\PublishOptions;
 use Dorpmaster\Nats\Protocol\HPubMessage;
 use Dorpmaster\Nats\Protocol\MsgMessage;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LogLevel;
 
 final class JetStreamPublisherTest extends TestCase
 {
@@ -31,11 +33,17 @@ final class JetStreamPublisherTest extends TestCase
 
                     return true;
                 }),
-                0.5,
+                self::callback(static function (float $timeout): bool {
+                    self::assertGreaterThan(0.0, $timeout);
+                    self::assertLessThanOrEqual(0.5, $timeout);
+
+                    return true;
+                }),
             )
             ->willReturn(new MsgMessage('reply', '1', '{"stream":"ORDERS","seq":10,"duplicate":false}'));
 
-        $publisher = new JetStreamPublisher($client);
+        $logger    = new RecordingLogger();
+        $publisher = new JetStreamPublisher($client, $logger);
 
         // Act
         $ack = $publisher->publish(
@@ -49,6 +57,8 @@ final class JetStreamPublisherTest extends TestCase
         self::assertSame('ORDERS', $ack->getStream());
         self::assertSame(10, $ack->getSeq());
         self::assertFalse($ack->isDuplicate());
+        $logger->assertHas(LogLevel::DEBUG, 'js.publish.start', static fn (array $context): bool => ($context['subject'] ?? null) === 'orders.created');
+        $logger->assertHas(LogLevel::DEBUG, 'js.publish.ack', static fn (array $context): bool => ($context['stream'] ?? null) === 'ORDERS');
     }
 
     public function testPublishMapsJetStreamErrorResponseToException(): void
@@ -59,7 +69,8 @@ final class JetStreamPublisherTest extends TestCase
             ->method('request')
             ->willReturn(new MsgMessage('reply', '1', '{"error":{"code":409,"description":"expected stream mismatch"}}'));
 
-        $publisher = new JetStreamPublisher($client);
+        $logger    = new RecordingLogger();
+        $publisher = new JetStreamPublisher($client, $logger);
 
         // Assert
         self::expectException(JetStreamApiException::class);
@@ -96,12 +107,17 @@ final class JetStreamPublisherTest extends TestCase
             ->method('request')
             ->willThrowException(new CancelledException());
 
-        $publisher = new JetStreamPublisher($client);
+        $logger    = new RecordingLogger();
+        $publisher = new JetStreamPublisher($client, $logger);
 
         // Assert
         self::expectException(JetStreamTimeoutException::class);
 
         // Act
-        $publisher->publish('orders.created', 'payload', timeoutMs: 200);
+        try {
+            $publisher->publish('orders.created', 'payload', timeoutMs: 200);
+        } finally {
+            $logger->assertHas(LogLevel::WARNING, 'js.publish.timeout');
+        }
     }
 }

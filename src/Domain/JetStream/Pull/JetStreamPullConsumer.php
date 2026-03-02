@@ -18,6 +18,8 @@ use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use JsonException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
 {
@@ -26,6 +28,7 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
     private JetStreamMessageAcknowledgerInterface $acknowledger;
     private JetStreamMessageAckerInterface $messageAcker;
     private JetStreamConsumeLoop $consumeLoop;
+    private LoggerInterface $logger;
 
     public function __construct(
         private readonly JetStreamControlPlaneTransportInterface $transport,
@@ -33,10 +36,19 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         private readonly string $consumer,
         JetStreamMessageAcknowledgerInterface|null $acknowledger = null,
         JetStreamConsumeLoop|null $consumeLoop = null,
+        LoggerInterface|null $logger = null,
     ) {
+        $this->logger       = $logger ?? new NullLogger();
         $this->acknowledger = $acknowledger ?? new JetStreamClientAcknowledger($this->transport->getClient());
-        $this->messageAcker = new JetStreamMessageAcker($this->acknowledger);
-        $this->consumeLoop  = $consumeLoop ?? new JetStreamConsumeLoop();
+        $this->messageAcker = new LoggingJetStreamMessageAcker(
+            new JetStreamMessageAcker($this->acknowledger),
+            $this->logger,
+        );
+        $this->consumeLoop  = $consumeLoop ?? new JetStreamConsumeLoop(
+            logger: $this->logger,
+            stream: $this->stream,
+            consumer: $this->consumer,
+        );
     }
 
     public function fetch(
@@ -59,6 +71,15 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         $deferredCompleted = new DeferredFuture();
         $fetchError        = null;
         $result            = null;
+        $this->logger->debug('js.pull.fetch', [
+            'stream' => $this->stream,
+            'consumer' => $this->consumer,
+            'batch' => $batch,
+            'expires_ms' => $expiresMs,
+            'no_wait' => $noWait,
+            'max_bytes' => $maxBytes,
+            'idle_hb_ms' => $idleHeartbeatMs,
+        ]);
 
         $sid = $this->transport->getClient()->subscribe($inbox, function (NatsProtocolMessageInterface $message) use (&$messages, $batch, $deferredCompleted, &$fetchError): null {
             try {
@@ -111,10 +132,8 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
 
                 $result = new JetStreamFetchResult($messages, $this->messageAcker);
             } else {
-                $timedOut     = false;
                 $cancellation = new TimeoutCancellation(($expiresMs + self::FETCH_TIMEOUT_OVERHEAD_MS) / 1000);
-                $cid          = $cancellation->subscribe(static function () use (&$timedOut, $deferredCompleted): void {
-                    $timedOut = true;
+                $cid          = $cancellation->subscribe(static function () use ($deferredCompleted): void {
                     if (!$deferredCompleted->isComplete()) {
                         $deferredCompleted->complete(false);
                     }
@@ -139,6 +158,11 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         if ($result === null) {
             throw new \LogicException('JetStream fetch result was not produced');
         }
+
+        $this->logger->debug('js.pull.fetch.result', [
+            'received' => $result->getReceivedCount(),
+            'empty' => $result->getReceivedCount() === 0,
+        ]);
 
         return $result;
     }
@@ -186,7 +210,13 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
 
     public function consume(PullConsumeOptions $options): JetStreamConsumeHandle
     {
-        $handle = new JetStreamConsumeHandle($this->messageAcker, $options);
+        $handle = new JetStreamConsumeHandle(
+            $this->messageAcker,
+            $options,
+            logger: $this->logger,
+            stream: $this->stream,
+            consumer: $this->consumer,
+        );
 
         $this->consumeLoop->start(
             $handle,
@@ -220,6 +250,9 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         $description = (string) ($decoded['error']['description'] ?? 'JetStream pull fetch error');
 
         if ($code === 404) {
+            $this->logger->debug('js.pull.fetch.empty', [
+                'code' => $code,
+            ]);
             return;
         }
 

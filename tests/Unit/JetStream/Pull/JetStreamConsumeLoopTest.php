@@ -12,7 +12,9 @@ use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamConsumeHandle;
 use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamConsumeLoop;
 use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamFetchResult;
 use Dorpmaster\Nats\Domain\JetStream\Pull\PullConsumeOptions;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LogLevel;
 
 final class JetStreamConsumeLoopTest extends TestCase
 {
@@ -55,7 +57,8 @@ final class JetStreamConsumeLoopTest extends TestCase
         $acknowledger = $this->createStub(JetStreamMessageAcknowledgerInterface::class);
         $acker        = new JetStreamMessageAcker($acknowledger);
         $handle       = new JetStreamConsumeHandle($acker, new PullConsumeOptions(batch: 1, expiresMs: 1000));
-        $loop         = new JetStreamConsumeLoop();
+        $logger       = new RecordingLogger();
+        $loop         = new JetStreamConsumeLoop(logger: $logger);
         $calls        = 0;
         $loop->start($handle, function () use (&$calls, $acker, $handle): JetStreamFetchResult {
             $calls++;
@@ -87,7 +90,8 @@ final class JetStreamConsumeLoopTest extends TestCase
         $acknowledger = $this->createStub(JetStreamMessageAcknowledgerInterface::class);
         $acker        = new JetStreamMessageAcker($acknowledger);
         $handle       = new JetStreamConsumeHandle($acker, new PullConsumeOptions(batch: 1, expiresMs: 1000));
-        $loop         = new JetStreamConsumeLoop();
+        $logger       = new RecordingLogger();
+        $loop         = new JetStreamConsumeLoop(logger: $logger);
         $calls        = 0;
         $loop->start($handle, function () use (&$calls, $acker, $handle): JetStreamFetchResult {
             $calls++;
@@ -113,5 +117,6 @@ final class JetStreamConsumeLoopTest extends TestCase
         // Assert
         self::assertSame('m1', $first?->getPayload());
         self::assertNull($none);
+        $logger->assertHas(LogLevel::WARNING, 'js.consume.fetch.retry', static fn (array $context): bool => ($context['error'] ?? null) === ConnectionException::class);
     }
 }

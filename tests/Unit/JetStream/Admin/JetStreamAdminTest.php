@@ -8,7 +8,9 @@ use Dorpmaster\Nats\Domain\JetStream\Admin\JetStreamAdmin;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInterface;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LogLevel;
 
 final class JetStreamAdminTest extends TestCase
 {
@@ -30,7 +32,8 @@ final class JetStreamAdminTest extends TestCase
                 ],
             ]);
 
-        $admin = new JetStreamAdmin($transport);
+        $logger = new RecordingLogger();
+        $admin  = new JetStreamAdmin($transport, $logger);
 
         // Act
         $info = $admin->createStream(new StreamConfig('ORDERS', ['orders.*'], 'file'));
@@ -38,6 +41,7 @@ final class JetStreamAdminTest extends TestCase
         // Assert
         self::assertSame('ORDERS', $info->getName());
         self::assertSame(['orders.*'], $info->getSubjects());
+        $logger->assertHas(LogLevel::INFO, 'js.admin.stream.create', static fn (array $context): bool => ($context['stream'] ?? null) === 'ORDERS');
     }
 
     public function testCreateOrUpdateConsumerSendsExpectedSubjectAndPayload(): void

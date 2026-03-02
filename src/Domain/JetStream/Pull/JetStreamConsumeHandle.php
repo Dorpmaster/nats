@@ -15,6 +15,8 @@ use Dorpmaster\Nats\Domain\JetStream\Message\AckObserverInterface;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessage;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAckerInterface;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 use function Amp\delay;
 
@@ -39,6 +41,9 @@ final class JetStreamConsumeHandle implements AckObserverInterface
     public function __construct(
         private readonly JetStreamMessageAckerInterface $acker,
         private readonly PullConsumeOptions $options,
+        private readonly LoggerInterface|null $logger = null,
+        private readonly string|null $stream = null,
+        private readonly string|null $consumer = null,
     ) {
         $this->queue           = new Queue(self::INTERNAL_QUEUE_CAPACITY);
         $this->iterator        = $this->queue->iterate();
@@ -75,11 +80,22 @@ final class JetStreamConsumeHandle implements AckObserverInterface
                 if ($this->options->policy === SlowConsumerPolicy::DROP_NEW) {
                     if ($message instanceof JetStreamMessage && $this->shouldAutoTermDroppedMessage($message)) {
                         $this->acker->term($message);
+                        $this->getLogger()->warning('js.consume.drop_new.term', [
+                            'delivered' => $message->getDeliveryCount(),
+                            'max' => self::MAX_DROP_NEW_REDELIVERIES,
+                        ]);
                     }
 
                     continue;
                 }
 
+                $this->getLogger()->warning('js.consume.slow_consumer', [
+                    'policy' => $this->options->policy->value,
+                    'in_flight_messages' => $this->inFlightMessages,
+                    'in_flight_bytes' => $this->inFlightBytes,
+                    'max_messages' => $this->options->maxInFlightMessages,
+                    'max_bytes' => $this->options->maxInFlightBytes,
+                ]);
                 $exception     = new JetStreamSlowConsumerException(
                     $this->options->policy,
                     $this->inFlightMessages,
@@ -116,6 +132,11 @@ final class JetStreamConsumeHandle implements AckObserverInterface
 
         if ($this->state === ConsumeState::RUNNING) {
             $this->state = ConsumeState::STOPPING;
+            $this->getLogger()->info('js.consume.stop', [
+                'stream' => $this->stream,
+                'consumer' => $this->consumer,
+                'state' => $this->state->value,
+            ]);
         }
 
         $this->completeQueueOnce();
@@ -129,6 +150,11 @@ final class JetStreamConsumeHandle implements AckObserverInterface
 
         if ($this->state === ConsumeState::RUNNING) {
             $this->state = ConsumeState::DRAINING;
+            $this->getLogger()->info('js.consume.drain.start', [
+                'stream' => $this->stream,
+                'consumer' => $this->consumer,
+                'state' => $this->state->value,
+            ]);
         }
 
         $timeoutSeconds = ($timeoutMs ?? 10_000) / 1000;
@@ -138,6 +164,11 @@ final class JetStreamConsumeHandle implements AckObserverInterface
                 if ($this->state === ConsumeState::DRAINING) {
                     $this->state = ConsumeState::RUNNING;
                 }
+                $this->getLogger()->warning('js.consume.drain.timeout', [
+                    'stream' => $this->stream,
+                    'consumer' => $this->consumer,
+                    'state' => $this->state->value,
+                ]);
 
                 throw new JetStreamDrainTimeoutException();
             }
@@ -147,6 +178,11 @@ final class JetStreamConsumeHandle implements AckObserverInterface
 
         $this->stop();
         $this->awaitStopped($timeoutMs);
+        $this->getLogger()->info('js.consume.drain.success', [
+            'stream' => $this->stream,
+            'consumer' => $this->consumer,
+            'state' => $this->state->value,
+        ]);
     }
 
     public function getState(): ConsumeState
@@ -279,5 +315,10 @@ final class JetStreamConsumeHandle implements AckObserverInterface
         }
 
         return $deliveryCount > self::MAX_DROP_NEW_REDELIVERIES;
+    }
+
+    private function getLogger(): LoggerInterface
+    {
+        return $this->logger ?? new NullLogger();
     }
 }

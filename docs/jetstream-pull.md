@@ -109,3 +109,21 @@ Guard behavior:
 - at-least-once semantics
 - duplicates are possible
 - acknowledgements are required for progress tracking
+
+## Logging
+
+`JetStreamPullConsumer`, `JetStreamConsumeLoop`, and consume handle accept optional `Psr\Log\LoggerInterface`.
+If logger is omitted, `NullLogger` is used.
+
+Key events:
+- `js.pull.fetch`
+- `js.pull.fetch.result`
+- `js.pull.fetch.empty`
+- `js.consume.start`
+- `js.consume.fetch.retry`
+- `js.consume.slow_consumer`
+- `js.consume.drain.start`
+- `js.consume.drain.success`
+- `js.consume.drain.timeout`
+- `js.ack.send`
+- `js.ack.missing_reply`

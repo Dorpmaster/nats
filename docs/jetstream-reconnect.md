@@ -39,3 +39,10 @@ With local pull backpressure policy `DROP_NEW`:
 
 - `verifyPeer=true` requires valid CA and hostname/SAN match for all failover targets.
 - Avoid pinning `serverName` to one node in multi-node failover setup.
+
+## Debug Events
+
+JetStream reconnect-related diagnostics are available via PSR-3 logger integration in services:
+- control plane: `js.control.request`, `js.control.response`, `js.control.error`
+- publisher: `js.publish.retry`, `js.publish.timeout`
+- pull consume loop: `js.consume.fetch.retry`, `js.consume.drain.*`

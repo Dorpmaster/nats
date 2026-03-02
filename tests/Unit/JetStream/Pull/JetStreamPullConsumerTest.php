@@ -13,7 +13,9 @@ use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInt
 use Dorpmaster\Nats\Protocol\HMsgMessage;
 use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\MsgMessage;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LogLevel;
 
 final class JetStreamPullConsumerTest extends TestCase
 {
@@ -49,7 +51,8 @@ final class JetStreamPullConsumerTest extends TestCase
                 $handler(new MsgMessage('orders.created', '2', 'm2', 'ACK.ORDERS.C1.2'));
             });
 
-        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1');
+        $logger   = new RecordingLogger();
+        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1', logger: $logger);
 
         // Act
         $result   = $consumer->fetch(batch: 2, expiresMs: 1000);
@@ -60,6 +63,8 @@ final class JetStreamPullConsumerTest extends TestCase
         self::assertCount(2, $messages);
         self::assertSame('m1', $messages[0]->getPayload());
         self::assertSame('m2', $messages[1]->getPayload());
+        $logger->assertHas(LogLevel::DEBUG, 'js.pull.fetch', static fn (array $context): bool => ($context['stream'] ?? null) === 'ORDERS');
+        $logger->assertHas(LogLevel::DEBUG, 'js.pull.fetch.result', static fn (array $context): bool => ($context['received'] ?? null) === 2);
     }
 
     public function testFetchThrowsOnJsonErrorResponse(): void
@@ -86,7 +91,8 @@ final class JetStreamPullConsumerTest extends TestCase
                 $handler(new MsgMessage('inbox', '1', '{"error":{"code":409,"description":"consumer is deleted"}}'));
             });
 
-        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1');
+        $logger   = new RecordingLogger();
+        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1', logger: $logger);
 
         // Assert
         self::expectException(JetStreamApiException::class);
@@ -120,13 +126,15 @@ final class JetStreamPullConsumerTest extends TestCase
                 $handler(new MsgMessage('inbox', '1', '{"error":{"code":404,"description":"no messages"}}'));
             });
 
-        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1');
+        $logger   = new RecordingLogger();
+        $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1', logger: $logger);
 
         // Act
         $result = $consumer->fetch(batch: 1, expiresMs: 200, noWait: true);
 
         // Assert
         self::assertSame(0, $result->getReceivedCount());
+        $logger->assertHas(LogLevel::DEBUG, 'js.pull.fetch.empty', static fn (array $context): bool => ($context['code'] ?? null) === 404);
     }
 
     public function testConsumeReturnsMessagesViaHandle(): void

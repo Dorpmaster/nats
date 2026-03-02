@@ -321,6 +321,24 @@ JetStream publisher and pull workflows are covered by reconnect/failover integra
 
 See [docs/jetstream-reconnect.md](docs/jetstream-reconnect.md).
 
+## JetStream Logging (PSR-3)
+
+JetStream services accept optional PSR-3 logger dependencies. If logger is omitted, `NullLogger` is used.
+
+```php
+use Dorpmaster\Nats\Domain\JetStream\Admin\JetStreamAdmin;
+use Dorpmaster\Nats\Domain\JetStream\Publish\JetStreamPublisher;
+use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumerFactory;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
+
+$logger = new YourPsrLogger();
+
+$transport = new JetStreamControlPlaneTransport($client, logger: $logger);
+$admin = new JetStreamAdmin($transport, $logger);
+$publisher = new JetStreamPublisher($client, $logger);
+$pullFactory = new JetStreamPullConsumerFactory($transport, logger: $logger);
+```
+
 ## Testing
 
 ```bash

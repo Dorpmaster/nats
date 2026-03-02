@@ -8,7 +8,9 @@ use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneHeadersRequestMessage;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamRawPubMessage;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LogLevel;
 
 final class JetStreamControlPlaneTransportPublishRequestTest extends TestCase
 {
@@ -26,13 +28,15 @@ final class JetStreamControlPlaneTransportPublishRequestTest extends TestCase
                 return true;
             }));
 
-        $transport = new JetStreamControlPlaneTransport($client);
+        $logger    = new RecordingLogger();
+        $transport = new JetStreamControlPlaneTransport($client, logger: $logger);
 
         // Act
         $transport->publishRequest('CONSUMER.MSG.NEXT.ORDERS.C1', ['batch' => 1], 'INBOX.1');
 
         // Assert
         self::assertTrue(true);
+        $logger->assertHas(LogLevel::DEBUG, 'js.control.publish_request', static fn (array $context): bool => ($context['reply_to'] ?? null) === 'INBOX.1');
     }
 
     public function testPublishRequestUsesHpubWhenHeadersProvided(): void

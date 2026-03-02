@@ -9,7 +9,9 @@ use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneRequestMessage;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
 use Dorpmaster\Nats\Protocol\MsgMessage;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LogLevel;
 
 final class JetStreamControlPlaneTransportTest extends TestCase
 {
@@ -31,13 +33,16 @@ final class JetStreamControlPlaneTransportTest extends TestCase
             )
             ->willReturn(new MsgMessage('reply', '1', '{"ok":true}'));
 
-        $transport = new JetStreamControlPlaneTransport($client);
+        $logger    = new RecordingLogger();
+        $transport = new JetStreamControlPlaneTransport($client, logger: $logger);
 
         // Act
         $response = $transport->request('STREAM.INFO.ORDERS', ['foo' => 'bar'], 750);
 
         // Assert
         self::assertSame(['ok' => true], $response);
+        $logger->assertHas(LogLevel::DEBUG, 'js.control.request', static fn (array $context): bool => isset($context['subject']));
+        $logger->assertHas(LogLevel::DEBUG, 'js.control.response', static fn (array $context): bool => ($context['ok'] ?? false) === true);
     }
 
     public function testRequestMapsApiErrorToException(): void
@@ -48,7 +53,8 @@ final class JetStreamControlPlaneTransportTest extends TestCase
             ->method('request')
             ->willReturn(new MsgMessage('reply', '1', '{"error":{"code":404,"description":"stream not found"}}'));
 
-        $transport = new JetStreamControlPlaneTransport($client);
+        $logger    = new RecordingLogger();
+        $transport = new JetStreamControlPlaneTransport($client, logger: $logger);
 
         // Assert
         self::expectException(JetStreamApiException::class);
@@ -56,7 +62,11 @@ final class JetStreamControlPlaneTransportTest extends TestCase
         self::expectExceptionMessage('stream not found');
 
         // Act
-        $transport->request('STREAM.INFO.ORDERS', []);
+        try {
+            $transport->request('STREAM.INFO.ORDERS', []);
+        } finally {
+            $logger->assertHas(LogLevel::WARNING, 'js.control.error', static fn (array $context): bool => ($context['code'] ?? null) === 404);
+        }
     }
 
     public function testRequestThrowsExceptionOnInvalidJsonResponse(): void

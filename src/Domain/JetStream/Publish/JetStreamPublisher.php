@@ -16,6 +16,8 @@ use Dorpmaster\Nats\Protocol\HPubMessage;
 use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use JsonException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Throwable;
 
 use function Amp\delay;
@@ -26,6 +28,7 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
 
     public function __construct(
         private ClientInterface $client,
+        private LoggerInterface|null $logger = null,
     ) {
     }
 
@@ -39,10 +42,21 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
         $message            = $this->createRequestMessage($subject, $payload, $effectiveOptions);
         $effectiveTimeoutMs = $timeoutMs ?? self::DEFAULT_TIMEOUT_MS;
         $deadline           = microtime(true) + ($effectiveTimeoutMs / 1000);
+        $headers            = $effectiveOptions->toHeaders();
+        $this->getLogger()->debug('js.publish.start', [
+            'subject' => $subject,
+            'timeout_ms' => $effectiveTimeoutMs,
+            'has_msg_id' => isset($headers['Nats-Msg-Id']),
+            'bytes' => strlen($payload),
+        ]);
 
         while (true) {
             $remaining = $deadline - microtime(true);
             if ($remaining <= 0) {
+                $this->getLogger()->warning('js.publish.timeout', [
+                    'subject' => $subject,
+                    'timeout_ms' => $effectiveTimeoutMs,
+                ]);
                 throw new JetStreamTimeoutException();
             }
 
@@ -52,14 +66,30 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
                 break;
             } catch (ClientNotConnectedException) {
                 if (microtime(true) >= $deadline) {
+                    $this->getLogger()->warning('js.publish.timeout', [
+                        'subject' => $subject,
+                        'timeout_ms' => $effectiveTimeoutMs,
+                    ]);
                     throw new JetStreamTimeoutException();
                 }
 
+                $this->getLogger()->warning('js.publish.retry', [
+                    'reason' => ClientNotConnectedException::class,
+                    'remaining_ms' => (int) max(0, round(($deadline - microtime(true)) * 1000)),
+                ]);
                 delay(0.05);
                 continue;
             } catch (CancelledException $exception) {
+                $this->getLogger()->warning('js.publish.timeout', [
+                    'subject' => $subject,
+                    'timeout_ms' => $effectiveTimeoutMs,
+                ]);
                 throw new JetStreamTimeoutException(previous: $exception);
             } catch (Throwable $exception) {
+                $this->getLogger()->warning('js.publish.error', [
+                    'code' => 500,
+                    'description' => $exception->getMessage(),
+                ]);
                 throw new JetStreamApiException(500, $exception->getMessage(), $exception);
             }
         }
@@ -83,13 +113,28 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
         if (isset($decoded['error']) && is_array($decoded['error'])) {
             $code        = (int) ($decoded['error']['code'] ?? 500);
             $description = (string) ($decoded['error']['description'] ?? 'JetStream publish error');
+            $this->getLogger()->warning('js.publish.error', [
+                'code' => $code,
+                'description' => $description,
+            ]);
 
             throw new JetStreamApiException($code, $description);
         }
 
         try {
-            return PubAck::fromArray($decoded);
+            $ack = PubAck::fromArray($decoded);
+            $this->getLogger()->debug('js.publish.ack', [
+                'stream' => $ack->getStream(),
+                'seq' => $ack->getSeq(),
+                'duplicate' => $ack->isDuplicate(),
+            ]);
+
+            return $ack;
         } catch (Throwable $exception) {
+            $this->getLogger()->warning('js.publish.error', [
+                'code' => 500,
+                'description' => $exception->getMessage(),
+            ]);
             throw new JetStreamApiException(500, $exception->getMessage(), $exception);
         }
     }
@@ -105,5 +150,10 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
         }
 
         return new HPubMessage($subject, $payload, new HeaderBag($headers));
+    }
+
+    private function getLogger(): LoggerInterface
+    {
+        return $this->logger ?? new NullLogger();
     }
 }
