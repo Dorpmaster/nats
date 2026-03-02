@@ -1,6 +1,5 @@
 {
     "name": "dorpmaster/nats",
-    "version": "1.0.0",
     "type": "library",
     "description": "Production-grade asynchronous NATS client for PHP 8.5+ powered by AMPHP.",
     "keywords": [
