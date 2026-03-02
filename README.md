@@ -88,6 +88,70 @@ $client->unsubscribe($sid);
 $client->disconnect();
 ```
 
+## Docker Examples
+
+Default container command runs Core worker example:
+
+```bash
+docker build -t nats-php-driver .
+docker run --rm --network <your-network> -e NATS_HOST=nats nats-php-driver
+```
+
+Run JetStream worker example by overriding command:
+
+```bash
+docker run --rm --network <your-network> \
+  -e NATS_HOST=nats \
+  -e NATS_PORT=4222 \
+  nats-php-driver php ./bin/jetstream_worker.php
+```
+
+Run local JetStream test server (from this repository) and execute JetStream example in same network:
+
+```bash
+docker compose -f docker/compose.nats.jetstream.test.yml --project-name nats-js-it up -d --wait
+docker run --rm --network nats-client-jetstream-test-network \
+  -e NATS_HOST=nats-js \
+  -e NATS_PORT=4222 \
+  nats-php-driver php ./bin/jetstream_worker.php
+```
+
+Core worker environment variables:
+
+- `NATS_HOST` (default `nats`)
+- `NATS_PORT` (default `4222`)
+- `NATS_CONNECT_TIMEOUT_MS` (default `1000`)
+- `NATS_LOG_LEVEL` (`debug|info|warning|error`, default `info`)
+- `NATS_SUBJECT` (default `demo.jobs`)
+- `NATS_REPLY_PAYLOAD` (default `ok`)
+- `NATS_PUBLISH_EVERY_MS` (default `0`, disabled)
+- `NATS_PUBLISH_PAYLOAD` (default `demo-message`)
+- `NATS_RECONNECT_ENABLED` (default `1`)
+- `NATS_RECONNECT_ATTEMPTS` (default `10`, `-1`/`null` for infinite)
+- `NATS_RECONNECT_BACKOFF_INITIAL_MS` (default `50`)
+- `NATS_RECONNECT_BACKOFF_MAX_MS` (default `1000`)
+- `NATS_RECONNECT_BACKOFF_MULTIPLIER` (default `2.0`)
+- `NATS_RECONNECT_JITTER` (default `0.2`)
+- `NATS_RECONNECT_SERVERS` (CSV `host:port`, default empty)
+
+JetStream worker environment variables:
+
+- `JS_HOST` / `JS_PORT` (fallback to `NATS_HOST` / `NATS_PORT`)
+- `JS_STREAM` (default `ORDERS`)
+- `JS_SUBJECTS` (CSV, default `orders.*`)
+- `JS_CONSUMER` (default `C1`)
+- `JS_FILTER_SUBJECT` (default `orders.created`)
+- `JS_PUBLISH_SUBJECT` (default equals `JS_FILTER_SUBJECT`)
+- `JS_PUBLISH_COUNT` (default `10`)
+- `JS_PUBLISH_PREFIX` (default `hello-`)
+- `JS_CONSUME_MAX` (default `10`, `<=0` means unlimited)
+- `JS_CONSUME_BATCH` (default `10`)
+- `JS_CONSUME_EXPIRES_MS` (default `1000`)
+- `JS_CONSUME_NO_WAIT` (default `0`)
+- `JS_CONSUME_MAX_IN_FLIGHT_MESSAGES` (default `100`)
+- `JS_CONSUME_MAX_IN_FLIGHT_BYTES` (default `5000000`)
+- `JS_SLOW_CONSUMER_POLICY` (`error|drop_new`, default `error`)
+
 ## Cluster Example
 
 ```php
