@@ -1,10 +1,12 @@
-# NATS AMPHP Client
+# NATS PHP Client
+Stable: 1.0.0
 
 Asynchronous NATS client for PHP 8.5+ built on AMPHP 3.x.
 
 This library provides a production-oriented Core NATS client with reconnect orchestration, cluster failover, TLS, bounded buffering, and deterministic test coverage for failure scenarios.
 
-Status: **1.0.0-rc1**.
+Status: **stable** (`v1.0.0`, released on 2026-02-28).  
+Release details: [GitHub Release 1.0.0](https://github.com/Dorpmaster/nats/releases/tag/1.0.0) | [Release Notes](RELEASE_NOTES_1.0.0.md)
 
 ## What This Library Provides
 
@@ -22,7 +24,7 @@ Status: **1.0.0-rc1**.
 ## Installation
 
 ```bash
-composer require dorpmaster/nats
+composer require dorpmaster/nats:^1.0
 ```
 
 Requirements:
@@ -421,7 +423,7 @@ make test
 
 - Versioning follows SemVer.
 - Public API includes classes and interfaces under `src/Domain/*` and documented entry points (`Client`, `ConnectionConfiguration`, `ClientConfiguration`, protocol message contracts).
-- Internal behavior may evolve between RC builds if API compatibility is preserved.
+- Internal behavior may evolve in minor/patch releases while preserving API compatibility.
 
 ## Documentation Index
 
@@ -444,3 +446,11 @@ make test
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Release
+
+Current stable release: **1.0.0**
+
+See:
+- [CHANGELOG.md](CHANGELOG.md)
+- [RELEASE_NOTES_1.0.0.md](RELEASE_NOTES_1.0.0.md)
