@@ -6,7 +6,7 @@ This library separates orchestration concerns from transport and buffering logic
 
 - `Client`
   - Orchestrates lifecycle state transitions.
-  - Coordinates reconnect, drain, ping hooks, and subscription restore.
+  - Coordinates reconnect, drain, ping hooks, initial handshake barrier, and subscription restore.
   - Delegates outbound buffering to `WriteBufferService`.
 - `Connection`
   - Owns socket lifecycle and protocol parser feed.
@@ -18,7 +18,7 @@ This library separates orchestration concerns from transport and buffering logic
 - `WriteBufferService`
   - Owns outbound queue, pending counters, overflow policy.
   - Runs writer loop against active connection.
-  - Supports flush/drain and failed-frame recovery after reconnect.
+  - Supports pause/resume for handshake gating, flush/drain, and failed-frame recovery after reconnect.
 - `PingService`
   - Sends periodic PING, tracks PONG RTT, detects timeout.
   - Emits telemetry and callback signals.
@@ -52,10 +52,11 @@ This library separates orchestration concerns from transport and buffering logic
 
 1. `connect()` moves `NEW|CLOSED -> CONNECTING`.
 2. `Connection::open()` establishes socket and parser feed.
-3. `Client` moves to `CONNECTED`, starts writer + optional ping loop.
-4. On transport/parser failure, `Client` enters `RECONNECTING` and runs failover/backoff.
-5. On reconnect success, subscriptions are re-sent and state returns to `CONNECTED`.
-6. `drain()` enters `DRAINING`, flushes and unsubscribes, then closes to `CLOSED`.
+3. `Client` moves to `CONNECTED`, but outbound application writes stay paused until initial protocol readiness completes.
+4. After inbound `INFO`, client sends `CONNECT`, then `PING`, then waits for inbound `PONG` before resuming buffered application writes and starting regular ping health monitoring.
+5. On transport/parser failure, `Client` enters `RECONNECTING` and runs failover/backoff.
+6. On reconnect success, the same readiness barrier is applied again; restored subscriptions are replayed before buffered application frames are flushed.
+7. `drain()` enters `DRAINING`, flushes and unsubscribes, then closes to `CLOSED`.
 
 ## Design Constraints
 

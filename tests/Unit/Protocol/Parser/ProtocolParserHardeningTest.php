@@ -10,6 +10,7 @@ use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\InfoMessage;
 use Dorpmaster\Nats\Protocol\MsgMessage;
 use Dorpmaster\Nats\Protocol\PingMessage;
+use Dorpmaster\Nats\Protocol\PongMessage;
 use Dorpmaster\Nats\Tests\Support\ProtocolChunkFeeder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -53,6 +54,14 @@ final class ProtocolParserHardeningTest extends TestCase
             PingMessage::class,
             static function (NatsProtocolMessageInterface $message): void {
                 self::assertInstanceOf(PingMessage::class, $message);
+            },
+        ];
+
+        yield 'pong-fragmented' => [
+            ['PO', "NG\r\n"],
+            PongMessage::class,
+            static function (NatsProtocolMessageInterface $message): void {
+                self::assertInstanceOf(PongMessage::class, $message);
             },
         ];
 
@@ -104,8 +113,10 @@ final class ProtocolParserHardeningTest extends TestCase
         $info = "INFO {\"server_id\":\"id\",\"server_name\":\"nats\",\"version\":\"1\",\"go\":\"go\",\"host\":\"127.0.0.1\",\"port\":4222,\"headers\":true,\"max_payload\":1024,\"proto\":1}\r\n";
 
         yield 'two-ping-frames' => ["PING\r\nPING\r\n", ['PING', 'PING']];
+        yield 'ping-and-pong' => ["PING\r\nPONG\r\n", ['PING', 'PONG']];
         yield 'ping-and-msg' => ["PING\r\nMSG s 1 5\r\nhello\r\n", ['PING', 'MSG']];
         yield 'info-and-ping' => [$info . "PING\r\n", ['INFO', 'PING']];
+        yield 'info-and-pong' => [$info . "PONG\r\n", ['INFO', 'PONG']];
     }
 
     public function testParsesMsgWithExtraSpacesInMetadata(): void

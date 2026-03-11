@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Documented the initial NATS readiness barrier and outbound buffering semantics in README and operational docs.
+
+### Fixed
+
+- Enforced `INFO -> CONNECT -> PING/PONG -> READY` before any application-level `SUB/PUB/HPUB` is written.
+- Buffered early `subscribe()/publish()/request()` calls until readiness, including request inbox subscription setup.
+- Re-applied the same barrier on reconnect and replayed restored subscriptions before buffered publishes flush.
+- Added inbound protocol parser support for server `PONG` frames used by the readiness barrier.
+
 ## [1.0.0] - 2026-03-02
 
 First stable release (`v1.0.0`).

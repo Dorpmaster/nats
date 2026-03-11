@@ -32,6 +32,7 @@ use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
 use Dorpmaster\Nats\Connection\ServerPoolService;
 use Dorpmaster\Nats\Client\Cluster\InfoConnectUrlsExtractor;
+use Dorpmaster\Nats\Protocol\Contracts\ConnectMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\InfoMessageInterface;
@@ -62,6 +63,9 @@ final class Client implements ClientInterface
     private DeferredCancellation|null $reconnectBackoffCancellation = null;
     private int $reconnectBackoffEpoch                              = 0;
     private int|null $activeReconnectBackoffEpoch                   = null;
+    private bool $handshakeReady                                    = false;
+    private bool $awaitingInitialPong                               = false;
+    private bool $replaySubscriptionsOnReady                        = false;
     /** @var array<string, string> */
     private array $subscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
@@ -229,6 +233,10 @@ final class Client implements ClientInterface
                 }
 
                 if ($message->getType() === NatsMessageType::PONG) {
+                    if ($this->awaitingInitialPong && !$this->handshakeReady) {
+                        $this->completeHandshake();
+                    }
+
                     $this->pingService->onPongReceived();
                 }
 
@@ -258,7 +266,7 @@ final class Client implements ClientInterface
                             'message' => $response,
                         ]);
 
-                        $this->enqueueOutbound($response, true);
+                        $this->sendResponseMessage($response);
                     } catch (Throwable $exception) {
                         $this->logger?->error('An exception was thrown during sending the response message', [
                             'exception' => $exception,
@@ -383,7 +391,7 @@ final class Client implements ClientInterface
             $this->logger?->debug('Sending "SUB" message', [
                 'message' => $message,
             ]);
-            $this->connection->send($message);
+            $this->enqueueOutbound($message);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception was thrown while subscribing', [
                 'exception' => $exception,
@@ -411,7 +419,21 @@ final class Client implements ClientInterface
         unset($this->subscriptionsBySid[$sid]);
 
         try {
-            $this->connection->send($message);
+            if ($this->status === ClientState::DRAINING && !$this->connection->isClosed()) {
+                $this->sendImmediate($message);
+
+                return;
+            }
+
+            if ($this->status === ClientState::CLOSED) {
+                return;
+            }
+
+            if ($this->status === ClientState::RECONNECTING) {
+                return;
+            }
+
+            $this->enqueueOutbound($message);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception was thrown while unsubscribing', [
                 'exception' => $exception,
@@ -480,7 +502,14 @@ final class Client implements ClientInterface
             throw $exception;
         } finally {
             if (isset($sid) === true) {
-                $this->unsubscribe($sid);
+                try {
+                    $this->unsubscribe($sid);
+                } catch (Throwable $exception) {
+                    $this->logger?->debug('Ignoring request cleanup unsubscribe failure', [
+                        'sid' => $sid,
+                        'exception' => $exception,
+                    ]);
+                }
             }
 
             if (isset($cid) === true) {
@@ -494,6 +523,10 @@ final class Client implements ClientInterface
      */
     private function waitForStatus(ClientState $status, float $timeout = 10): ClientState
     {
+        if ($this->status === $status) {
+            return $this->status;
+        }
+
         $this->logger?->debug('Waiting for the connection status', [
             'status' => $status->value,
             'timeout' => $timeout,
@@ -544,6 +577,13 @@ final class Client implements ClientInterface
                 $suspension->resume($payload);
             }
         );
+
+        if ($this->status === $status) {
+            $cancellation->unsubscribe($cancellationId);
+            $this->eventDispatcher->unsubscribe($subId);
+
+            return $this->status;
+        }
 
         $status = $suspension->suspend();
         if (!$status instanceof ClientState) {
@@ -614,7 +654,7 @@ final class Client implements ClientInterface
                     $this->serverPool->setCurrent($server);
                 }
                 $this->transitionTo(ClientState::CONNECTED, 'reconnect succeeded');
-                $this->restoreSubscriptions();
+                $this->replaySubscriptionsOnReady = true;
 
                 return true;
             } catch (Throwable $exception) {
@@ -714,14 +754,21 @@ final class Client implements ClientInterface
     private function restoreSubscriptions(): void
     {
         foreach ($this->subscriptionsBySid as $sid => $subject) {
-            $this->connection->send(new SubMessage($subject, $sid));
+            $this->enqueueOutbound(new SubMessage($subject, $sid), true);
         }
     }
 
     private function unsubscribeAll(): void
     {
         foreach (array_keys($this->subscriptionsBySid) as $sid) {
-            $this->unsubscribe($sid);
+            try {
+                $this->unsubscribe($sid);
+            } catch (Throwable $exception) {
+                $this->logger?->debug('Ignoring unsubscribeAll failure during shutdown', [
+                    'sid' => $sid,
+                    'exception' => $exception,
+                ]);
+            }
         }
     }
 
@@ -759,28 +806,15 @@ final class Client implements ClientInterface
         $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
 
         if ($targetState === ClientState::CONNECTED) {
+            $this->handshakeReady      = false;
+            $this->awaitingInitialPong = false;
+            if ($previous !== ClientState::RECONNECTING) {
+                $this->replaySubscriptionsOnReady = false;
+            }
             $this->writeBuffer->start($this->connection);
+            $this->writeBuffer->pause();
             if ($previous === ClientState::RECONNECTING) {
                 $this->metricsCollector->increment('reconnect_count', 1);
-            }
-            if ($this->configuration->isPingEnabled()) {
-                $this->pingService->start(
-                    function (): void {
-                        try {
-                            $this->enqueueOutbound(new PingMessage(), true);
-                        } catch (Throwable) {
-                            // Ignore ping enqueue failures. Reconnect path is handled by regular state checks.
-                        }
-                    },
-                    function (): void {
-                        if (
-                            $this->configuration->isPingReconnectOnTimeout()
-                            && $this->status === ClientState::CONNECTED
-                        ) {
-                            $this->tryReconnect(new ConnectionException('Ping timeout'));
-                        }
-                    },
-                );
             }
         } elseif ($previous === ClientState::CONNECTED) {
             $this->pingService->stop();
@@ -842,6 +876,72 @@ final class Client implements ClientInterface
             ]);
 
             throw $exception;
+        }
+    }
+
+    private function sendResponseMessage(NatsProtocolMessageInterface $message): void
+    {
+        if ($message instanceof ConnectMessageInterface) {
+            $this->sendImmediate($message);
+            $this->awaitingInitialPong = true;
+            $this->sendImmediate(new PingMessage());
+
+            return;
+        }
+
+        if (!$this->handshakeReady && $message->getType() === NatsMessageType::PONG) {
+            $this->sendImmediate($message);
+
+            return;
+        }
+
+        $this->enqueueOutbound($message, true);
+    }
+
+    private function sendImmediate(NatsProtocolMessageInterface $message): void
+    {
+        $this->connection->send($message);
+    }
+
+    private function completeHandshake(): void
+    {
+        if ($this->handshakeReady) {
+            return;
+        }
+
+        $this->awaitingInitialPong = false;
+        $this->handshakeReady      = true;
+        if ($this->replaySubscriptionsOnReady) {
+            $this->replaySubscriptionsOnReady = false;
+            $this->restoreSubscriptionsImmediately();
+        }
+        $this->writeBuffer->resume();
+
+        if ($this->configuration->isPingEnabled()) {
+            $this->pingService->start(
+                function (): void {
+                    try {
+                        $this->enqueueOutbound(new PingMessage(), true);
+                    } catch (Throwable) {
+                        // Ignore ping enqueue failures. Reconnect path is handled by regular state checks.
+                    }
+                },
+                function (): void {
+                    if (
+                        $this->configuration->isPingReconnectOnTimeout()
+                        && $this->status === ClientState::CONNECTED
+                    ) {
+                        $this->tryReconnect(new ConnectionException('Ping timeout'));
+                    }
+                },
+            );
+        }
+    }
+
+    private function restoreSubscriptionsImmediately(): void
+    {
+        foreach ($this->subscriptionsBySid as $sid => $subject) {
+            $this->sendImmediate(new SubMessage($subject, $sid));
         }
     }
 

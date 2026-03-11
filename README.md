@@ -17,6 +17,7 @@ Release details: [GitHub Release 1.0.0](https://github.com/Dorpmaster/nats/relea
 - TLS support (`verifyPeer`, `caFile`/`caPath`, SNI, optional mTLS)
 - Inbound backpressure (`ERROR` / `DROP_NEW`) in `MessageDispatcher`
 - Outbound write buffer with bounded queue and overflow policy
+- Initial handshake barrier: application frames are released only after `INFO -> CONNECT -> PING/PONG -> READY`
 - Ping-based health monitoring (RTT + timeout hooks)
 - Drain lifecycle (`DRAINING` -> `CLOSED`) for graceful shutdown
 - Deterministic unit + integration tests (single server, TLS, cluster, cluster+TLS)
@@ -298,7 +299,9 @@ Configured in `ClientConfiguration`:
 ## Production Considerations
 
 - `publish()` is at-least-once under reconnect windows; duplicate delivery is possible.
+- `subscribe()/publish()/request()` called before protocol readiness are buffered internally and flushed after the initial `INFO -> CONNECT -> PING/PONG -> READY` barrier.
 - `request()` is not silently retried; timeout/failure can happen during disconnect.
+- During reconnect, restored subscriptions are replayed before buffered application publishes are flushed.
 - Inbound overflow behavior depends on configured policy (`ERROR` fails fast, `DROP_NEW` drops new messages).
 - Outbound overflow behavior depends on `writeBufferPolicy` (`ERROR` throws `WriteBufferOverflowException`, `DROP_NEW` drops new frame).
 - Memory usage is bounded only if your configured limits are bounded.

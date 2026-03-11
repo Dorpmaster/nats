@@ -48,4 +48,7 @@ Reconnect wakeups are protected by epoch:
 
 - `publish()/request()` fail-fast by default (`bufferWhileReconnecting=false`).
 - with `bufferWhileReconnecting=true`, frames are queued in outbound write buffer (bounded by configured limits).
+- after reconnect `open()`, application frames still wait behind the initial protocol barrier: `INFO -> CONNECT -> PING/PONG -> READY`.
+- existing subscriptions are replayed immediately after reconnect readiness and before buffered application publishes are flushed.
 - `request()` is not silently retried.
+- request setup (`SUB` reply inbox + request `PUB/HPUB`) follows the same buffering rules and will not hit the socket before readiness.
