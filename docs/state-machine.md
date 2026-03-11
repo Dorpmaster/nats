@@ -34,6 +34,14 @@ Illegal transitions are rejected.
   - idempotent
   - transitions to `DRAINING`, then `CLOSED`
 
+## Protocol Readiness Barrier
+
+`CONNECTED` means transport is open and lifecycle orchestration is active. It does not mean application frames are already writable on the socket.
+
+- before readiness, the client must observe `INFO`, send `CONNECT`, send `PING`, and receive `PONG`;
+- `subscribe()/publish()/request()` invoked before this point are buffered, not written immediately;
+- after reconnect, the same barrier is applied again before buffered frames are flushed.
+
 ## Reconnect Flow
 
 `CONNECTED -> RECONNECTING -> CONNECTED` happens on transport failures if reconnect is enabled.

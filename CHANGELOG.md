@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.1] - 2026-03-11
+
+### Fixed
+
+- Enforced handshake readiness barrier before application-level commands.
+- Buffered SUB / PUB / HPUB until the NATS connection reaches READY state.
+- Added ProtocolParser support for inbound PONG.
+- Ensured reconnect path re-applies handshake barrier and replays subscriptions before buffered publish.
+
+### Notes
+
+This fix resolves `Authorization Violation` errors observed on clusters that strictly enforce NATS handshake ordering.
+
 ## [1.0.0] - 2026-03-02
 
 First stable release (`v1.0.0`).

@@ -7,9 +7,11 @@ namespace Dorpmaster\Nats\Tests\Unit\Client;
 use Amp\NullCancellation;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
+use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
+use Dorpmaster\Nats\Domain\Client\WriteBufferInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\SubMessage;
@@ -24,9 +26,16 @@ final class ClientSubscribeTest extends TestCase
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
-            $connection = self::createMock(ConnectionInterface::class);
-            $connection->expects(self::once())
-                ->method('send');
+            $writeBuffer = self::createMock(WriteBufferInterface::class);
+            $writeBuffer->method('setFailureHandler');
+            $writeBuffer->expects(self::once())
+                ->method('enqueue')
+                ->with(self::callback(static function (mixed $frame): bool {
+                    self::assertInstanceOf(SubMessage::class, $frame->message);
+
+                    return true;
+                }))
+                ->willReturn(true);
 
             $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
 
@@ -43,12 +52,14 @@ final class ClientSubscribeTest extends TestCase
             $client = new Client(
                 configuration: $configuration,
                 cancellation: $cancellation,
-                connection: $connection,
+                connection: self::createStub(ConnectionInterface::class),
                 eventDispatcher: $eventDispatcher,
                 messageDispatcher: $messageDispatcher,
                 storage: $storage,
                 logger: $this->logger,
+                writeBuffer: $writeBuffer,
             );
+            $this->setState($client, ClientState::CONNECTED);
 
             $sid = $client->subscribe('test', static fn() => null);
 
@@ -60,9 +71,10 @@ final class ClientSubscribeTest extends TestCase
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
-            $connection = self::createMock(ConnectionInterface::class);
-            $connection->expects(self::once())
-                ->method('send')
+            $writeBuffer = self::createMock(WriteBufferInterface::class);
+            $writeBuffer->method('setFailureHandler');
+            $writeBuffer->expects(self::once())
+                ->method('enqueue')
                 ->willThrowException(new \RuntimeException());
 
             $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
@@ -80,12 +92,14 @@ final class ClientSubscribeTest extends TestCase
             $client = new Client(
                 configuration: $configuration,
                 cancellation: $cancellation,
-                connection: $connection,
+                connection: self::createStub(ConnectionInterface::class),
                 eventDispatcher: $eventDispatcher,
                 messageDispatcher: $messageDispatcher,
                 storage: $storage,
                 logger: $this->logger,
+                writeBuffer: $writeBuffer,
             );
+            $this->setState($client, ClientState::CONNECTED);
 
             self::expectException(\RuntimeException::class);
             $client->subscribe('test', static fn() => null);
@@ -97,12 +111,13 @@ final class ClientSubscribeTest extends TestCase
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
             // Arrange
-            $connection = self::createMock(ConnectionInterface::class);
-            $connection->expects(self::once())
-                ->method('send')
-                ->with(self::callback(static function (mixed $message): bool {
-                    self::assertInstanceOf(SubMessage::class, $message);
-                    self::assertSame('customsid', $message->getSid());
+            $writeBuffer = self::createMock(WriteBufferInterface::class);
+            $writeBuffer->method('setFailureHandler');
+            $writeBuffer->expects(self::once())
+                ->method('enqueue')
+                ->with(self::callback(static function (mixed $frame): bool {
+                    self::assertInstanceOf(SubMessage::class, $frame->message);
+                    self::assertSame('customsid', $frame->message->getSid());
 
                     return true;
                 }));
@@ -122,13 +137,15 @@ final class ClientSubscribeTest extends TestCase
             $client = new Client(
                 configuration: new ClientConfiguration(),
                 cancellation: new NullCancellation(),
-                connection: $connection,
+                connection: self::createStub(ConnectionInterface::class),
                 eventDispatcher: new EventDispatcher(),
                 messageDispatcher: $messageDispatcher,
                 storage: $storage,
                 logger: $this->logger,
                 subscriptionIdHelper: $idHelper,
+                writeBuffer: $writeBuffer,
             );
+            $this->setState($client, ClientState::CONNECTED);
 
             // Act
             $sid = $client->subscribe('test', static fn() => null);
@@ -136,5 +153,17 @@ final class ClientSubscribeTest extends TestCase
             // Assert
             self::assertSame('customsid', $sid);
         });
+    }
+
+    private function setState(Client $client, ClientState $state): void
+    {
+        $setStatus = \Closure::bind(
+            static function (Client $target, ClientState $state): void {
+                $target->status = $state;
+            },
+            null,
+            Client::class,
+        );
+        $setStatus($client, $state);
     }
 }

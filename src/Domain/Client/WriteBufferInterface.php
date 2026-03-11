@@ -11,6 +11,10 @@ interface WriteBufferInterface
 {
     public function start(ConnectionInterface $connection): void;
 
+    public function pause(): void;
+
+    public function resume(): void;
+
     public function detach(): void;
 
     public function stop(): void;

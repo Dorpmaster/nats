@@ -33,6 +33,7 @@ final class WriteBufferService implements WriteBufferInterface
     private DeferredFuture|null $deferredDrained = null;
     /** @var \Closure(\Throwable):void|null */
     private \Closure|null $failureHandler = null;
+    private bool $paused                  = false;
 
     public function __construct(
         private readonly int $maxMessages,
@@ -58,6 +59,25 @@ final class WriteBufferService implements WriteBufferInterface
         }
 
         $this->loopCancellation = new DeferredCancellation();
+        if (!$this->paused) {
+            $this->scheduleWriter();
+        }
+    }
+
+    public function pause(): void
+    {
+        $this->paused = true;
+        $this->loopCancellation->cancel();
+    }
+
+    public function resume(): void
+    {
+        if (!$this->paused) {
+            return;
+        }
+
+        $this->paused           = false;
+        $this->loopCancellation = new DeferredCancellation();
         $this->scheduleWriter();
     }
 
@@ -70,6 +90,7 @@ final class WriteBufferService implements WriteBufferInterface
     public function stop(): void
     {
         $this->detach();
+        $this->paused          = false;
         $this->failedFrame     = null;
         $this->pendingMessages = 0;
         $this->pendingBytes    = 0;
@@ -80,6 +101,12 @@ final class WriteBufferService implements WriteBufferInterface
 
     public function drain(int|null $timeoutMs = null): void
     {
+        if ($this->paused) {
+            $this->stop();
+
+            return;
+        }
+
         $this->scheduleWriter();
 
         if ($this->pendingMessages === 0) {
@@ -159,7 +186,7 @@ final class WriteBufferService implements WriteBufferInterface
 
     private function scheduleWriter(): void
     {
-        if ($this->writerRunning) {
+        if ($this->writerRunning || $this->paused) {
             return;
         }
 
@@ -176,6 +203,10 @@ final class WriteBufferService implements WriteBufferInterface
     private function writerLoop(): void
     {
         while (true) {
+            if ($this->paused) {
+                return;
+            }
+
             if ($this->failedFrame !== null) {
                 $frame = $this->failedFrame;
             } else {

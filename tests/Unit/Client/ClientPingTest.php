@@ -8,6 +8,7 @@ use Amp\CancelledException;
 use Amp\NullCancellation;
 use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
+use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
@@ -58,14 +59,23 @@ final class ClientPingTest extends TestCase
             );
 
             // Act
-            $client->connect();
-            $this->forceTick();
+            $connection->open();
+            $bootstrap = \Closure::bind(
+                static function (Client $target): void {
+                    $target->transitionTo(ClientState::CONNECTING, 'test bootstrap');
+                    $target->transitionTo(ClientState::CONNECTED, 'test bootstrap');
+                    $target->completeHandshake();
+                },
+                null,
+                Client::class,
+            );
+            $bootstrap($client);
             $pingService->triggerTimeout();
             $this->forceTick();
 
             // Assert
             self::assertGreaterThanOrEqual(2, $openCalls);
-            self::assertGreaterThanOrEqual(2, $pingService->startCalls());
+            self::assertSame(1, $pingService->startCalls());
         });
     }
 }
