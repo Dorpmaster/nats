@@ -63,3 +63,5 @@ This library separates orchestration concerns from transport and buffering logic
 - No unbounded retries without explicit config.
 - No hidden `sleep()` in test orchestration.
 - Services do not mutate client state directly unless explicitly orchestrated by `Client`.
+
+Handshake ordering is protected by a protocol conformance test using a fake NATS server. The client guarantees that application-level commands are buffered until the connection reaches READY (`INFO -> CONNECT -> PING/PONG`).
