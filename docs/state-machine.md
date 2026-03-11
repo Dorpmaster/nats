@@ -32,7 +32,7 @@ Illegal transitions are rejected.
   - `DRAINING|CLOSED`: rejected
 - `drain()` / `disconnect()`
   - idempotent
-  - transitions to `DRAINING`, then `CLOSED`
+  - transitions to `DRAINING`, stops scheduling new inbound callback tasks, waits bounded time for active callback tasks, then transitions to `CLOSED`
 
 ## Protocol Readiness Barrier
 
@@ -47,3 +47,11 @@ Illegal transitions are rejected.
 `CONNECTED -> RECONNECTING -> CONNECTED` happens on transport failures if reconnect is enabled.
 
 If attempts are exhausted, state moves to `CLOSED`.
+
+## Inbound Dispatch Execution Model
+
+- `CONNECTED` and `RECONNECTING` may both have active inbound callback tasks;
+- parsed inbound messages are scheduled onto async dispatch tasks instead of running inline on the reader loop;
+- active callback task completion order is not part of the public contract;
+- callback failures are logged and isolated from the reader loop state machine;
+- `DRAINING` prevents scheduling new inbound callback tasks but allows already active ones to finish within the configured drain timeout.
