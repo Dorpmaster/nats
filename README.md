@@ -300,6 +300,7 @@ Configured in `ClientConfiguration`:
 
 - `publish()` is at-least-once under reconnect windows; duplicate delivery is possible.
 - `subscribe()/publish()/request()` called before protocol readiness are buffered internally and flushed after the initial `INFO -> CONNECT -> PING/PONG -> READY` barrier.
+- As of v1.0.1 the client guarantees that no application-level commands are sent before the connection reaches READY (`INFO -> CONNECT -> PING/PONG`).
 - `request()` is not silently retried; timeout/failure can happen during disconnect.
 - During reconnect, restored subscriptions are replayed before buffered application publishes are flushed.
 - Inbound overflow behavior depends on configured policy (`ERROR` fails fast, `DROP_NEW` drops new messages).

@@ -4,16 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Changed
-
-- Documented the initial NATS readiness barrier and outbound buffering semantics in README and operational docs.
+## [1.0.1] - 2026-XX-XX
 
 ### Fixed
 
-- Enforced `INFO -> CONNECT -> PING/PONG -> READY` before any application-level `SUB/PUB/HPUB` is written.
-- Buffered early `subscribe()/publish()/request()` calls until readiness, including request inbox subscription setup.
-- Re-applied the same barrier on reconnect and replayed restored subscriptions before buffered publishes flush.
-- Added inbound protocol parser support for server `PONG` frames used by the readiness barrier.
+- Enforced handshake readiness barrier before application-level commands.
+- Buffered SUB / PUB / HPUB until the NATS connection reaches READY state.
+- Added ProtocolParser support for inbound PONG.
+- Ensured reconnect path re-applies handshake barrier and replays subscriptions before buffered publish.
+
+### Notes
+
+This fix resolves `Authorization Violation` errors observed on clusters that strictly enforce NATS handshake ordering.
 
 ## [1.0.0] - 2026-03-02
 
