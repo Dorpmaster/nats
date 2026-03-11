@@ -13,6 +13,7 @@ use Amp\TimeoutCancellation;
 use Closure;
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
+use Dorpmaster\Nats\Domain\Client\InboundDispatchOverflowException;
 use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
 use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
@@ -52,7 +53,6 @@ use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Throwable;
 
-use function Amp\async;
 use function Amp\delay;
 
 final class Client implements ClientInterface
@@ -61,15 +61,12 @@ final class Client implements ClientInterface
 
     private ClientState $status;
 
-    private DeferredFuture|null $deferredDispatching                = null;
-    private int $activeDispatchCount                                = 0;
     private DeferredCancellation|null $reconnectBackoffCancellation = null;
     private int $reconnectBackoffEpoch                              = 0;
     private int|null $activeReconnectBackoffEpoch                   = null;
     private bool $handshakeReady                                    = false;
     private bool $awaitingInitialPong                               = false;
     private bool $replaySubscriptionsOnReady                        = false;
-    private bool $dispatchStopRequested                             = false;
     /** @var array<string, string> */
     private array $subscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
@@ -80,6 +77,7 @@ final class Client implements ClientInterface
     private readonly PingServiceInterface $pingService;
     private readonly ServerPoolInterface $serverPool;
     private readonly InfoConnectUrlsExtractor $infoConnectUrlsExtractor;
+    private readonly InboundDispatchScheduler $inboundDispatchScheduler;
 
     public function __construct(
         private readonly ClientConfigurationInterface $configuration,
@@ -129,6 +127,11 @@ final class Client implements ClientInterface
         );
         $this->serverPool               = $serverPool ?? new ServerPoolService($this->configuration->getTimeProvider());
         $this->infoConnectUrlsExtractor = $infoConnectUrlsExtractor ?? new InfoConnectUrlsExtractor();
+        $this->inboundDispatchScheduler = new InboundDispatchScheduler(
+            $this->configuration->getMaxInboundDispatchConcurrency(),
+            $this->configuration->getMaxPendingInboundDispatch(),
+            $this->logger,
+        );
         $servers                        = $this->configuration->getServers();
         if ($servers !== []) {
             $this->serverPool->addServers($servers);
@@ -247,12 +250,35 @@ final class Client implements ClientInterface
                     ]);
 
                     if (in_array($message->getType(), [NatsMessageType::MSG, NatsMessageType::HMSG], true)) {
-                        $this->scheduleInboundDispatch($message);
+                        assert($message instanceof MsgMessageInterface || $message instanceof HMsgMessageInterface);
+                        $this->inboundDispatchScheduler->dispatch($message, function () use ($message): void {
+                            $response = $this->messageDispatcher->dispatch($message);
+                            if (
+                                !$response instanceof PubMessageInterface
+                                && !$response instanceof HPubMessageInterface
+                            ) {
+                                return;
+                            }
+
+                            assert($response instanceof NatsProtocolMessageInterface);
+
+                            $this->logger?->debug('Queueing the response message', [
+                                'message' => $response,
+                            ]);
+
+                            $this->enqueueInboundDispatchResponse($response);
+                        });
 
                         continue;
                     }
 
                     $response = $this->messageDispatcher->dispatch($message);
+                } catch (InboundDispatchOverflowException $exception) {
+                    if (!$this->tryReconnect($exception)) {
+                        return;
+                    }
+
+                    continue;
                 } catch (Throwable $exception) {
                     $this->logger?->error('An exception was thrown during dispatching the message', [
                         'exception' => $exception,
@@ -325,8 +351,8 @@ final class Client implements ClientInterface
             $this->transitionTo(ClientState::DRAINING, 'drain() started');
         }
 
-        $this->dispatchStopRequested = true;
-        $this->awaitActiveDispatches($timeoutMs);
+        $this->inboundDispatchScheduler->stop();
+        $this->inboundDispatchScheduler->drain($timeoutMs);
 
         $this->writeBuffer->drain($timeoutMs);
 
@@ -785,9 +811,9 @@ final class Client implements ClientInterface
         $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
 
         if ($targetState === ClientState::CONNECTED) {
-            $this->dispatchStopRequested = false;
-            $this->handshakeReady        = false;
-            $this->awaitingInitialPong   = false;
+            $this->inboundDispatchScheduler->reset();
+            $this->handshakeReady      = false;
+            $this->awaitingInitialPong = false;
             if ($previous !== ClientState::RECONNECTING) {
                 $this->replaySubscriptionsOnReady = false;
             }
@@ -812,6 +838,7 @@ final class Client implements ClientInterface
         }
 
         if (in_array($targetState, [ClientState::RECONNECTING, ClientState::CLOSED], true)) {
+            $this->inboundDispatchScheduler->stop();
             if ($targetState === ClientState::RECONNECTING && $this->configuration->isBufferWhileReconnecting()) {
                 $this->writeBuffer->detach();
             } else {
@@ -923,111 +950,6 @@ final class Client implements ClientInterface
         }
 
         $this->serverPool->addDiscoveredServers($servers);
-    }
-
-    private function scheduleInboundDispatch(NatsProtocolMessageInterface $message): void
-    {
-        if ($this->dispatchStopRequested) {
-            $this->logger?->debug('Skipping inbound dispatch because stop was requested', [
-                'message' => $message,
-            ]);
-
-            return;
-        }
-
-        $this->acquireDispatchTask();
-
-        async(function () use ($message): void {
-            try {
-                try {
-                    $response = $this->messageDispatcher->dispatch($message);
-                } catch (Throwable $exception) {
-                    $this->logger?->error('An exception was thrown during dispatching the message', [
-                        'exception' => $exception,
-                        'message' => $message,
-                    ]);
-
-                    return;
-                }
-
-                if ($response !== null) {
-                    try {
-                        if (
-                            !$response instanceof PubMessageInterface
-                            && !$response instanceof HPubMessageInterface
-                        ) {
-                            return;
-                        }
-
-                        assert($response instanceof NatsProtocolMessageInterface);
-
-                        $this->logger?->debug('Queueing the response message', [
-                            'message' => $response,
-                        ]);
-
-                        $this->enqueueInboundDispatchResponse($response);
-                    } catch (Throwable $exception) {
-                        $this->logger?->error('An exception was thrown during sending the response message', [
-                            'exception' => $exception,
-                            'message' => $message,
-                        ]);
-                    }
-                }
-            } finally {
-                $this->releaseDispatchTask();
-            }
-        });
-    }
-
-    private function acquireDispatchTask(): void
-    {
-        if ($this->activeDispatchCount === 0) {
-            $this->deferredDispatching = new DeferredFuture();
-        }
-
-        $this->activeDispatchCount++;
-    }
-
-    private function releaseDispatchTask(): void
-    {
-        if ($this->activeDispatchCount === 0) {
-            return;
-        }
-
-        $this->activeDispatchCount--;
-        if ($this->activeDispatchCount > 0) {
-            return;
-        }
-
-        if ($this->deferredDispatching?->isComplete() === false) {
-            $this->deferredDispatching->complete();
-        }
-    }
-
-    private function awaitActiveDispatches(int|null $timeoutMs): void
-    {
-        if ($this->activeDispatchCount === 0) {
-            return;
-        }
-
-        $this->logger?->debug('Waiting for the finish of the active dispatched message processing', [
-            'active_dispatches' => $this->activeDispatchCount,
-        ]);
-
-        try {
-            $timeout = ($timeoutMs ?? 10_000) / 1000;
-            $this->deferredDispatching?->getFuture()->await(new TimeoutCancellation($timeout));
-
-            $this->logger?->debug('Active dispatched message processing has finished');
-        } catch (Throwable $exception) {
-            $this->logger?->error(
-                'Time is over while waiting for the finish of the active dispatched message processing',
-                [
-                    'exception' => $exception,
-                    'active_dispatches' => $this->activeDispatchCount,
-                ]
-            );
-        }
     }
 
     private function enqueueInboundDispatchResponse(

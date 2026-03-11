@@ -19,6 +19,8 @@ use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\MsgMessage;
+use Dorpmaster\Nats\Protocol\PingMessage;
+use Dorpmaster\Nats\Protocol\PongMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
 use PHPUnit\Framework\TestCase;
 
@@ -225,16 +227,18 @@ final class InboundDispatchExecutionModelTest extends TestCase
         $this->runAsyncTest(function () {
             $releaseFirst  = new DeferredFuture();
             $firstStarted  = new DeferredFuture();
-            $secondStarted = new DeferredFuture();
+            $thirdStarted  = new DeferredFuture();
             $events        = [];
             $openCalls     = 0;
+            $secondStarted = false;
 
             $storage = new SubscriptionStorage();
             $storage->add('sid', static function (MsgMessage $message) use (
                 $releaseFirst,
                 $firstStarted,
-                $secondStarted,
+                $thirdStarted,
                 &$events,
+                &$secondStarted,
             ): null {
                 if ($message->getPayload() === 'first') {
                     $events[] = 'first-start';
@@ -245,8 +249,14 @@ final class InboundDispatchExecutionModelTest extends TestCase
                     return null;
                 }
 
-                $events[] = 'second-start';
-                $secondStarted->complete();
+                if ($message->getPayload() === 'second') {
+                    $secondStarted = true;
+
+                    return null;
+                }
+
+                $events[] = 'third-start';
+                $thirdStarted->complete();
 
                 return null;
             });
@@ -254,8 +264,12 @@ final class InboundDispatchExecutionModelTest extends TestCase
             $client = $this->createClient(
                 $this->createPlannedConnection(
                     [
-                        [new MsgMessage('subject', 'sid', 'first'), new \RuntimeException('connection lost')],
-                        [new MsgMessage('subject', 'sid', 'second'), new CancelledException()],
+                        [
+                            new MsgMessage('subject', 'sid', 'first'),
+                            new MsgMessage('subject', 'sid', 'second'),
+                            new \RuntimeException('connection lost'),
+                        ],
+                        [new MsgMessage('subject', 'sid', 'third'), new CancelledException()],
                     ],
                     $openCalls,
                 ),
@@ -264,20 +278,115 @@ final class InboundDispatchExecutionModelTest extends TestCase
                     reconnectEnabled: true,
                     maxReconnectAttempts: 1,
                     reconnectJitterFraction: 0.0,
+                    maxInboundDispatchConcurrency: 1,
+                    maxPendingInboundDispatch: 1,
                 ),
             );
 
             $client->connect();
 
             $firstStarted->getFuture()->await(new TimeoutCancellation(1));
-            $secondStarted->getFuture()->await(new TimeoutCancellation(1));
+            $thirdStarted->getFuture()->await(new TimeoutCancellation(1));
 
             self::assertGreaterThanOrEqual(2, $openCalls);
-            self::assertSame(['first-start', 'second-start'], $events);
+            self::assertSame(['first-start', 'third-start'], $events);
+            self::assertFalse($secondStarted);
 
             $releaseFirst->complete();
 
             $client->disconnect();
+        });
+    }
+
+    public function testControlMessagesAreNotBlockedBySchedulerSaturation(): void
+    {
+        $this->setTimeout(5);
+        $this->runAsyncTest(function () {
+            $releaseFirst = new DeferredFuture();
+            $firstStarted = new DeferredFuture();
+            $pongSent     = new DeferredFuture();
+            $pongObserved = false;
+
+            $storage = new SubscriptionStorage();
+            $storage->add('sid', static function (MsgMessage $message) use ($releaseFirst, $firstStarted): null {
+                $firstStarted->complete();
+                $releaseFirst->getFuture()->await(new TimeoutCancellation(1));
+
+                return null;
+            });
+
+            $client = $this->createClient(
+                $this->createPlannedConnection(
+                    [
+                        [new MsgMessage('subject', 'sid', 'first'), new PingMessage(), new CancelledException()],
+                    ],
+                    onSend: static function (NatsProtocolMessageInterface $message) use ($pongSent): void {
+                        if ($message instanceof PongMessage) {
+                            $pongSent->complete();
+                        }
+                    },
+                ),
+                $storage,
+                new ClientConfiguration(maxInboundDispatchConcurrency: 1, maxPendingInboundDispatch: 1),
+            );
+
+            $client->connect();
+
+            $firstStarted->getFuture()->await(new TimeoutCancellation(1));
+            $pongSent->getFuture()->await(new TimeoutCancellation(1));
+
+            $pongObserved = true;
+            self::assertTrue($pongObserved);
+
+            $releaseFirst->complete();
+            $client->disconnect();
+        });
+    }
+
+    public function testPendingQueueOverflowTriggersControlledFailurePath(): void
+    {
+        $this->setTimeout(5);
+        $this->runAsyncTest(function () {
+            $releaseFirst = new DeferredFuture();
+            $firstStarted = new DeferredFuture();
+
+            $storage = new SubscriptionStorage();
+            $storage->add('sid', static function (MsgMessage $message) use ($releaseFirst, $firstStarted): null {
+                if ($message->getPayload() === 'first') {
+                    $firstStarted->complete();
+                    $releaseFirst->getFuture()->await(new TimeoutCancellation(1));
+                }
+
+                return null;
+            });
+
+            $client = $this->createClient(
+                $this->createPlannedConnection([
+                    [
+                        new MsgMessage('subject', 'sid', 'first'),
+                        new MsgMessage('subject', 'sid', 'second'),
+                        new MsgMessage('subject', 'sid', 'third'),
+                    ],
+                ]),
+                $storage,
+                new ClientConfiguration(
+                    reconnectEnabled: false,
+                    maxInboundDispatchConcurrency: 1,
+                    maxPendingInboundDispatch: 1,
+                ),
+            );
+
+            $client->connect();
+
+            $firstStarted->getFuture()->await(new TimeoutCancellation(1));
+
+            for ($i = 0; $i < 5 && $client->getState() !== ClientState::CLOSED; $i++) {
+                $this->forceTick();
+            }
+
+            self::assertSame(ClientState::CLOSED, $client->getState());
+
+            $releaseFirst->complete();
         });
     }
 
@@ -304,13 +413,16 @@ final class InboundDispatchExecutionModelTest extends TestCase
     /**
      * @param list<list<NatsProtocolMessageInterface|\Closure|CancelledException|\RuntimeException>> $plans
      */
-    private function createPlannedConnection(array $plans, int &$openCalls = 0): ConnectionInterface
-    {
+    private function createPlannedConnection(
+        array $plans,
+        int &$openCalls = 0,
+        \Closure|null $onSend = null,
+    ): ConnectionInterface {
         $incrementOpenCalls = static function () use (&$openCalls): void {
             $openCalls++;
         };
 
-        return new class ($plans, $incrementOpenCalls) implements ConnectionInterface {
+        return new class ($plans, $incrementOpenCalls, $onSend) implements ConnectionInterface {
             private bool $closed      = true;
             private int $activePlan   = -1;
             private int $receiveIndex = 0;
@@ -322,6 +434,7 @@ final class InboundDispatchExecutionModelTest extends TestCase
             public function __construct(
                 private readonly array $plans,
                 private readonly \Closure $incrementOpenCalls,
+                private readonly \Closure|null $onSend,
             ) {
             }
 
@@ -363,6 +476,7 @@ final class InboundDispatchExecutionModelTest extends TestCase
 
             public function send(NatsProtocolMessageInterface $message): void
             {
+                $this->onSend?->__invoke($message);
             }
         };
     }

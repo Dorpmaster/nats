@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [1.0.1] - 2026-03-11
 
+### Added
+
+- Bounded inbound dispatch scheduler for application-level `MSG/HMSG` callbacks.
+- New client configuration limits: `maxInboundDispatchConcurrency` and `maxPendingInboundDispatch`.
+
+### Changed
+
+- Inbound application dispatch now uses bounded concurrency with bounded pending queue.
+- Control messages (`INFO`, `PING`, `PONG`, `ERR`) remain inline even when application dispatch is saturated.
+- Pending inbound overflow now triggers a controlled transport failure instead of silent drop.
+
 ### Fixed
 
 - Enforced handshake readiness barrier before application-level commands.

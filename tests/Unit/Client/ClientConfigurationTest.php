@@ -31,6 +31,8 @@ final class ClientConfigurationTest extends TestCase
         self::assertSame(2_000, $configuration->getDeadServerCooldownMs());
         self::assertSame(10_000, $configuration->getMaxWriteBufferMessages());
         self::assertSame(5_000_000, $configuration->getMaxWriteBufferBytes());
+        self::assertSame(64, $configuration->getMaxInboundDispatchConcurrency());
+        self::assertSame(1_024, $configuration->getMaxPendingInboundDispatch());
         self::assertSame(WriteBufferPolicy::ERROR, $configuration->getWriteBufferPolicy());
         self::assertFalse($configuration->isBufferWhileReconnecting());
         self::assertFalse($configuration->isPingEnabled());
@@ -59,6 +61,8 @@ final class ClientConfigurationTest extends TestCase
             deadServerCooldownMs: 10_000,
             maxWriteBufferMessages: 50,
             maxWriteBufferBytes: 123_456,
+            maxInboundDispatchConcurrency: 7,
+            maxPendingInboundDispatch: 77,
             writeBufferPolicy: WriteBufferPolicy::DROP_NEW,
             bufferWhileReconnecting: true,
             pingEnabled: false,
@@ -80,11 +84,29 @@ final class ClientConfigurationTest extends TestCase
         self::assertSame(10_000, $configuration->getDeadServerCooldownMs());
         self::assertSame(50, $configuration->getMaxWriteBufferMessages());
         self::assertSame(123_456, $configuration->getMaxWriteBufferBytes());
+        self::assertSame(7, $configuration->getMaxInboundDispatchConcurrency());
+        self::assertSame(77, $configuration->getMaxPendingInboundDispatch());
         self::assertSame(WriteBufferPolicy::DROP_NEW, $configuration->getWriteBufferPolicy());
         self::assertTrue($configuration->isBufferWhileReconnecting());
         self::assertFalse($configuration->isPingEnabled());
         self::assertSame(5_000, $configuration->getPingIntervalMs());
         self::assertSame(500, $configuration->getPingTimeoutMs());
         self::assertFalse($configuration->isPingReconnectOnTimeout());
+    }
+
+    public function testRejectsNonPositiveInboundDispatchConcurrency(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('maxInboundDispatchConcurrency must be greater than 0');
+
+        new ClientConfiguration(maxInboundDispatchConcurrency: 0);
+    }
+
+    public function testRejectsNonPositivePendingInboundDispatchLimit(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('maxPendingInboundDispatch must be greater than 0');
+
+        new ClientConfiguration(maxPendingInboundDispatch: 0);
     }
 }

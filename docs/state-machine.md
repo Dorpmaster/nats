@@ -32,7 +32,7 @@ Illegal transitions are rejected.
   - `DRAINING|CLOSED`: rejected
 - `drain()` / `disconnect()`
   - idempotent
-  - transitions to `DRAINING`, stops scheduling new inbound callback tasks, waits bounded time for active callback tasks, then transitions to `CLOSED`
+  - transitions to `DRAINING`, stops accepting new inbound application callback tasks, waits bounded time for active + pending dispatch drain, then transitions to `CLOSED`
 
 ## Protocol Readiness Barrier
 
@@ -50,8 +50,12 @@ If attempts are exhausted, state moves to `CLOSED`.
 
 ## Inbound Dispatch Execution Model
 
-- `CONNECTED` and `RECONNECTING` may both have active inbound callback tasks;
-- parsed inbound messages are scheduled onto async dispatch tasks instead of running inline on the reader loop;
+- `CONNECTED` and `RECONNECTING` may both have active inbound application callback tasks;
+- parsed `MSG/HMSG` messages are scheduled onto bounded async dispatch tasks instead of running inline on the reader loop;
+- `INFO`, `PING`, `PONG`, and `ERR` remain inline and are not blocked by application dispatch saturation;
+- active application callback count is bounded by configuration;
+- pending application dispatch queue is bounded by configuration;
 - active callback task completion order is not part of the public contract;
 - callback failures are logged and isolated from the reader loop state machine;
-- `DRAINING` prevents scheduling new inbound callback tasks but allows already active ones to finish within the configured drain timeout.
+- pending queue overflow triggers a controlled failure path instead of silently dropping inbound messages;
+- `DRAINING` prevents scheduling new inbound callback tasks but allows already accepted work to finish within the configured drain timeout.

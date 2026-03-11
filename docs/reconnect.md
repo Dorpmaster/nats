@@ -55,8 +55,8 @@ Reconnect wakeups are protected by epoch:
 
 ## Inbound Dispatch During Reconnect
 
-- inbound subscription callbacks continue to run in their own async tasks if they were already scheduled before the transport failure;
-- the reader loop may reconnect while older callback tasks are still completing;
-- after reconnect, newly parsed inbound messages are scheduled with the same async dispatch path;
+- inbound `MSG/HMSG` callbacks continue to run in their own async tasks if they were already scheduled before the transport failure;
+- the scheduler queue is reset on reconnect so stale pending application dispatch does not block new post-reconnect traffic;
+- after reconnect, newly parsed inbound messages are scheduled with the same bounded async dispatch path;
 - callback exceptions remain isolated and do not by themselves terminate reconnect processing;
-- lifecycle shutdown (`drain()/disconnect()`) stops scheduling new inbound callbacks and waits bounded time for active dispatch tasks before closing.
+- lifecycle shutdown (`drain()/disconnect()`) stops scheduling new inbound callbacks and waits bounded time for active + pending dispatch drain before closing.
