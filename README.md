@@ -1,12 +1,18 @@
 # NATS PHP Client
-Stable: 1.0.0
+Stable: 1.0.3
 
 Asynchronous NATS client for PHP 8.5+ built on AMPHP 3.x.
 
 This library provides a production-oriented Core NATS client with reconnect orchestration, cluster failover, TLS, bounded buffering, and deterministic test coverage for failure scenarios.
 
-Status: **stable** (`v1.0.0`, released on 2026-02-28).  
-Release details: [GitHub Release 1.0.0](https://github.com/Dorpmaster/nats/releases/tag/1.0.0) | [Release Notes](RELEASE_NOTES_1.0.0.md)
+Status: **stable** (`v1.0.3`, patch release line).  
+Release details: [GitHub Release 1.0.3](https://github.com/Dorpmaster/nats/releases/tag/1.0.3) | [Release Notes](RELEASE_NOTES_1.0.3.md)
+
+Recent transport execution model improvements:
+
+- async inbound dispatch
+- bounded inbound dispatch scheduler
+- improved transport stability under load
 
 ## What This Library Provides
 
@@ -300,7 +306,7 @@ Configured in `ClientConfiguration`:
 
 - `publish()` is at-least-once under reconnect windows; duplicate delivery is possible.
 - `subscribe()/publish()/request()` called before protocol readiness are buffered internally and flushed after the initial `INFO -> CONNECT -> PING/PONG -> READY` barrier.
-- As of v1.0.1 the client guarantees that no application-level commands are sent before the connection reaches READY (`INFO -> CONNECT -> PING/PONG`).
+- The client guarantees that no application-level commands are sent before the connection reaches READY (`INFO -> CONNECT -> PING/PONG`).
 - `request()` is not silently retried; timeout/failure can happen during disconnect.
 - During reconnect, restored subscriptions are replayed before buffered application publishes are flushed.
 - Inbound overflow behavior depends on configured policy (`ERROR` fails fast, `DROP_NEW` drops new messages).
@@ -453,8 +459,10 @@ MIT. See [LICENSE](LICENSE).
 
 ## Release
 
-Current stable release: **1.0.0**
+Current stable release: **1.0.3**
 
 See:
 - [CHANGELOG.md](CHANGELOG.md)
-- [RELEASE_NOTES_1.0.0.md](RELEASE_NOTES_1.0.0.md)
+- [RELEASE_NOTES_1.0.3.md](RELEASE_NOTES_1.0.3.md)
+- [RELEASE_NOTES_1.0.2.md](RELEASE_NOTES_1.0.2.md)
+- [RELEASE_NOTES_1.0.1.md](RELEASE_NOTES_1.0.1.md)

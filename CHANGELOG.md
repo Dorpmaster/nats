@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.1] - 2026-03-11
+## [1.0.3] - 2026-03-12
 
 ### Added
 
@@ -17,6 +17,14 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Potential runaway growth of async inbound callback tasks after the move to async dispatch.
+- Transport behavior under burst inbound traffic is now bounded by scheduler limits.
+- Controlled failure path is used when inbound dispatch queue capacity is exceeded.
+
+For full details, see [RELEASE_NOTES_1.0.3.md](RELEASE_NOTES_1.0.3.md).
+
+## [1.0.2] - 2026-03-11
+
 - Enforced handshake readiness barrier before application-level commands.
 - Buffered SUB / PUB / HPUB until the NATS connection reaches READY state.
 - Added ProtocolParser support for inbound PONG.
@@ -25,6 +33,16 @@ All notable changes to this project are documented in this file.
 ### Notes
 
 This fix resolves `Authorization Violation` errors observed on clusters that strictly enforce NATS handshake ordering.
+
+For full details, see [RELEASE_NOTES_1.0.2.md](RELEASE_NOTES_1.0.2.md).
+
+## [1.0.1] - 2026-03-04
+
+### Changed
+
+- Corrected release description metadata after the initial stable rollout.
+
+For full details, see [RELEASE_NOTES_1.0.1.md](RELEASE_NOTES_1.0.1.md).
 
 ## [1.0.0] - 2026-03-02
 
