@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Tests\Unit\Client;
 
+use Amp\DeferredFuture;
+use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Client\MessageDispatcher;
 use Dorpmaster\Nats\Client\SlowConsumerPolicy;
 use Dorpmaster\Nats\Domain\Client\SlowConsumerException;
@@ -23,6 +25,8 @@ use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Tests\Support\RecordingMetricsCollector;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+
+use function Amp\async;
 
 final class MessageDispatcherTest extends TestCase
 {
@@ -116,6 +120,53 @@ final class MessageDispatcherTest extends TestCase
         self::assertInstanceOf(PubMessage::class, $response);
         self::assertSame('response', $response->getSubject());
         self::assertSame('payload', $response->getPayload());
+    }
+
+    public function testDispatchInvokesSubscriptionHandlerInlineBeforeReturning(): void
+    {
+        $events  = [];
+        $storage = self::createStub(SubscriptionStorageInterface::class);
+        $storage->method('get')->willReturn(static function () use (&$events): null {
+            $events[] = 'handler';
+
+            return null;
+        });
+
+        $dispatcher = new MessageDispatcher(
+            new ConnectInfo(false, false, false, 'php', '8.3'),
+            $storage,
+            self::createStub(LoggerInterface::class),
+        );
+
+        $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload'));
+        $events[] = 'returned';
+
+        self::assertSame(['handler', 'returned'], $events);
+    }
+
+    public function testDispatchReturnsOnlyAfterSubscriptionHandlerCompletes(): void
+    {
+        $release = new DeferredFuture();
+        $storage = self::createStub(SubscriptionStorageInterface::class);
+        $storage->method('get')->willReturn(static function () use ($release): null {
+            $release->getFuture()->await(new TimeoutCancellation(1));
+
+            return null;
+        });
+
+        $dispatcher = new MessageDispatcher(
+            new ConnectInfo(false, false, false, 'php', '8.3'),
+            $storage,
+            self::createStub(LoggerInterface::class),
+        );
+
+        $future = async(static fn() => $dispatcher->dispatch(new MsgMessage('subject', 'sid', 'payload')));
+
+        self::assertFalse($future->isComplete());
+
+        $release->complete();
+
+        self::assertNull($future->await(new TimeoutCancellation(1)));
     }
 
     public function testDispatchMsgNoResponse(): void

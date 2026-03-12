@@ -52,3 +52,11 @@ Reconnect wakeups are protected by epoch:
 - existing subscriptions are replayed immediately after reconnect readiness and before buffered application publishes are flushed.
 - `request()` is not silently retried.
 - request setup (`SUB` reply inbox + request `PUB/HPUB`) follows the same buffering rules and will not hit the socket before readiness.
+
+## Inbound Dispatch During Reconnect
+
+- inbound `MSG/HMSG` callbacks continue to run in their own async tasks if they were already scheduled before the transport failure;
+- the scheduler queue is reset on reconnect so stale pending application dispatch does not block new post-reconnect traffic;
+- after reconnect, newly parsed inbound messages are scheduled with the same bounded async dispatch path;
+- callback exceptions remain isolated and do not by themselves terminate reconnect processing;
+- lifecycle shutdown (`drain()/disconnect()`) stops scheduling new inbound callbacks and waits bounded time for active + pending dispatch drain before closing.

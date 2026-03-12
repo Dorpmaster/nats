@@ -37,6 +37,10 @@ interface ClientConfigurationInterface
 
     public function getMaxWriteBufferBytes(): int;
 
+    public function getMaxInboundDispatchConcurrency(): int;
+
+    public function getMaxPendingInboundDispatch(): int;
+
     public function getWriteBufferPolicy(): WriteBufferPolicy;
 
     public function isBufferWhileReconnecting(): bool;

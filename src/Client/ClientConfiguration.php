@@ -9,6 +9,7 @@ use Dorpmaster\Nats\Domain\Connection\ServerAddress;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
 use Dorpmaster\Nats\Domain\Telemetry\NullMetricsCollector;
 use Dorpmaster\Nats\Domain\Telemetry\TimeProviderInterface;
+use InvalidArgumentException;
 use Dorpmaster\Nats\Telemetry\MonotonicTimeProvider;
 
 final readonly class ClientConfiguration implements ClientConfigurationInterface
@@ -26,6 +27,8 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
         private int $deadServerCooldownMs = 2_000,
         private int $maxWriteBufferMessages = 10_000,
         private int $maxWriteBufferBytes = 5_000_000,
+        private int $maxInboundDispatchConcurrency = 64,
+        private int $maxPendingInboundDispatch = 1_024,
         private WriteBufferPolicy $writeBufferPolicy = WriteBufferPolicy::ERROR,
         private bool $bufferWhileReconnecting = false,
         private MetricsCollectorInterface|null $metricsCollector = null,
@@ -35,6 +38,13 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
         private bool $pingReconnectOnTimeout = true,
         private TimeProviderInterface|null $timeProvider = null,
     ) {
+        if ($this->maxInboundDispatchConcurrency <= 0) {
+            throw new InvalidArgumentException('maxInboundDispatchConcurrency must be greater than 0');
+        }
+
+        if ($this->maxPendingInboundDispatch <= 0) {
+            throw new InvalidArgumentException('maxPendingInboundDispatch must be greater than 0');
+        }
     }
 
     public function getWaitForStatusTimeout(): float
@@ -97,6 +107,16 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
     public function getMaxWriteBufferBytes(): int
     {
         return $this->maxWriteBufferBytes;
+    }
+
+    public function getMaxInboundDispatchConcurrency(): int
+    {
+        return $this->maxInboundDispatchConcurrency;
+    }
+
+    public function getMaxPendingInboundDispatch(): int
+    {
+        return $this->maxPendingInboundDispatch;
     }
 
     public function getWriteBufferPolicy(): WriteBufferPolicy

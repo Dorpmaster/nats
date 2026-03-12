@@ -20,6 +20,8 @@ Outbound sending is implemented by `WriteBufferService`.
 - `stop()`: cancel writer loop (idempotent).
 - `drain(timeoutMs)`: reject new enqueue, flush queue and in-flight write, then stop.
 
+Inbound application dispatch uses a separate bounded scheduler. `WriteBufferService` is not responsible for limiting inbound callback concurrency or pending inbound queue growth.
+
 ## Reconnect Behavior
 
 - when connection changes, writer loop is re-bound to new connection;
