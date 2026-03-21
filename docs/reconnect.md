@@ -14,6 +14,21 @@ $config = new ClientConfiguration(
 );
 ```
 
+Seed servers for reconnect / failover are configured through `servers`:
+
+```php
+$config = new ClientConfiguration(
+    reconnectEnabled: true,
+    servers: [
+        new ServerAddress('n1', 4222),
+        new ServerAddress('n2', 4222),
+    ],
+);
+```
+
+The legacy `reconnectServers` configuration field is no longer part of the public API.
+
+
 ## Backoff Formula
 
 For attempt `n`:

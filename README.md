@@ -1,18 +1,19 @@
 # NATS PHP Client
-Stable: 1.0.3
+Stable: 1.1.0
 
 Asynchronous NATS client for PHP 8.5+ built on AMPHP 3.x.
 
 This library provides a production-oriented Core NATS client with reconnect orchestration, cluster failover, TLS, bounded buffering, and deterministic test coverage for failure scenarios.
 
-Status: **stable** (`v1.0.3`, patch release line).  
-Release details: [GitHub Release 1.0.3](https://github.com/Dorpmaster/nats/releases/tag/1.0.3) | [Release Notes](RELEASE_NOTES_1.0.3.md)
+Status: **stable** (`v1.1.0`, minor release line).  
+Release details: [GitHub Release 1.1.0](https://github.com/Dorpmaster/nats/releases/tag/1.1.0) | [Release Notes](RELEASE_NOTES_1.1.0.md)
 
 Recent transport execution model improvements:
 
 - async inbound dispatch
 - bounded inbound dispatch scheduler
 - improved transport stability under load
+- simplified reconnect seed-server configuration around `servers`
 
 ## What This Library Provides
 
@@ -459,10 +460,11 @@ MIT. See [LICENSE](LICENSE).
 
 ## Release
 
-Current stable release: **1.0.3**
+Current stable release: **1.1.0**
 
 See:
 - [CHANGELOG.md](CHANGELOG.md)
+- [RELEASE_NOTES_1.1.0.md](RELEASE_NOTES_1.1.0.md)
 - [RELEASE_NOTES_1.0.3.md](RELEASE_NOTES_1.0.3.md)
 - [RELEASE_NOTES_1.0.2.md](RELEASE_NOTES_1.0.2.md)
 - [RELEASE_NOTES_1.0.1.md](RELEASE_NOTES_1.0.1.md)
