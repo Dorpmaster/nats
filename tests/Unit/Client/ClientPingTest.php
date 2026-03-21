@@ -62,8 +62,8 @@ final class ClientPingTest extends TestCase
             $connection->open();
             $bootstrap = \Closure::bind(
                 static function (Client $target): void {
-                    $target->transitionTo(ClientState::CONNECTING, 'test bootstrap');
-                    $target->transitionTo(ClientState::CONNECTED, 'test bootstrap');
+                    $target->moveToState(ClientState::CONNECTING, 'test bootstrap');
+                    $target->moveToState(ClientState::CONNECTED, 'test bootstrap');
                     $target->completeHandshake();
                 },
                 null,

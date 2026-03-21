@@ -493,7 +493,7 @@ final class ClientReconnectTest extends TestCase
         );
         $transition      = \Closure::bind(
             static function (Client $target, ClientState $state): void {
-                $target->transitionTo($state, 'test');
+                $target->moveToState($state, 'test');
             },
             null,
             Client::class,

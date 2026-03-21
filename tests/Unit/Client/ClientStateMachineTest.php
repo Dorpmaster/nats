@@ -57,6 +57,14 @@ final class ClientStateMachineTest extends TestCase
 
             // Act
             $client->connect();
+            $completeHandshake = \Closure::bind(
+                static function (Client $target): void {
+                    $target->completeHandshake();
+                },
+                null,
+                Client::class,
+            );
+            $completeHandshake($client);
 
             // Assert
             self::assertSame(ClientState::CONNECTED, $client->getState());
@@ -117,6 +125,14 @@ final class ClientStateMachineTest extends TestCase
 
             // Act
             $client->connect();
+            $completeHandshake = \Closure::bind(
+                static function (Client $target): void {
+                    $target->completeHandshake();
+                },
+                null,
+                Client::class,
+            );
+            $completeHandshake($client);
             $this->forceTick();
             $this->forceTick();
             $client->disconnect();

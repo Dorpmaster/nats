@@ -52,6 +52,10 @@ Reconnect wakeups are protected by epoch:
 - each wait captures epoch;
 - stale wakeup (`epoch` changed or state is no longer `RECONNECTING`) exits with no side effects.
 
+`connectionStatusChanged` for `RECONNECTING` is emitted only after this backoff
+context is initialized, so listeners do not observe `RECONNECTING` with stale
+or missing reconnect lifecycle internals.
+
 ## Dead Server Policy
 
 - reconnect tries current server first;
@@ -75,3 +79,11 @@ Reconnect wakeups are protected by epoch:
 - after reconnect, newly parsed inbound messages are scheduled with the same bounded async dispatch path;
 - callback exceptions remain isolated and do not by themselves terminate reconnect processing;
 - lifecycle shutdown (`drain()/disconnect()`) stops scheduling new inbound callbacks and waits bounded time for active + pending dispatch drain before closing.
+
+## State-Change Event Semantics
+
+State-change events are post-effects events.
+
+- `RECONNECTING` is dispatched after reconnect token/backoff state and write-path mode are already updated.
+- `CONNECTED` is dispatched after the protocol readiness barrier completes, not immediately after low-level socket open.
+- `CLOSED` is dispatched after lifecycle services are stopped for the closed state.

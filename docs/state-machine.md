@@ -20,6 +20,16 @@
 
 Illegal transitions are rejected.
 
+## Transition Semantics
+
+Each transition is applied in ordered phases:
+
+1. validate transition and commit the new `ClientState`
+2. apply internal lifecycle effects for that state
+3. dispatch `connectionStatusChanged`
+
+This means the state-change event is post-effects, not pre-effects.
+
 ## Method Contracts by State
 
 - `connect()`
@@ -36,7 +46,8 @@ Illegal transitions are rejected.
 
 ## Protocol Readiness Barrier
 
-`CONNECTED` means transport is open and lifecycle orchestration is active. It does not mean application frames are already writable on the socket.
+`CONNECTED` state means transport is open and handshake orchestration is active.
+The `CONNECTED` state-change event is emitted only after readiness completes.
 
 - before readiness, the client must observe `INFO`, send `CONNECT`, send `PING`, and receive `PONG`;
 - `subscribe()/publish()/request()` invoked before this point are buffered, not written immediately;
@@ -47,6 +58,10 @@ Illegal transitions are rejected.
 `CONNECTED -> RECONNECTING -> CONNECTED` happens on transport failures if reconnect is enabled.
 
 If attempts are exhausted, state moves to `CLOSED`.
+
+On `RECONNECTING`, the state-change event is emitted only after reconnect
+backoff context, write-buffer mode, and inbound scheduler restrictions have
+already been applied.
 
 ## Inbound Dispatch Execution Model
 
@@ -59,3 +74,12 @@ If attempts are exhausted, state moves to `CLOSED`.
 - callback failures are logged and isolated from the reader loop state machine;
 - pending queue overflow triggers a controlled failure path instead of silently dropping inbound messages;
 - `DRAINING` prevents scheduling new inbound callback tasks but allows already accepted work to finish within the configured drain timeout.
+
+## Event Observability Contract
+
+At the time `connectionStatusChanged` is dispatched:
+
+- `CONNECTED` listeners see a ready handshake, resumed write path, and final ping lifecycle for connected mode;
+- `RECONNECTING` listeners see reconnect backoff context already initialized and write path already switched into reconnect mode;
+- `DRAINING` listeners see drain restrictions already active for new application writes and inbound scheduling;
+- `CLOSED` listeners see lifecycle services already stopped as far as guaranteed by the client contract.
