@@ -25,9 +25,6 @@ interface ClientConfigurationInterface
 
     public function getReconnectJitterFraction(): float;
 
-    /** @return list<string> */
-    public function getReconnectServers(): array;
-
     /** @return list<ServerAddress> */
     public function getServers(): array;
 

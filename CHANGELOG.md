@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.0] - 2026-03-21
+
+### Breaking
+
+- Removed unused `ClientConfiguration::getReconnectServers()` from the public configuration contract.
+- Removed the `reconnectServers` named argument from `ClientConfiguration`.
+
+### Changed
+
+- Reconnect seed servers are now configured only through `servers: list<ServerAddress>`.
+- Example workers keep using `NATS_RECONNECT_SERVERS`, but map it directly into `servers`.
+
+### Internal
+
+- Removed dead configuration state that was not connected to runtime reconnect/failover logic.
+- Simplified `ClientConfiguration` tests to cover the single effective reconnect server path.
+
+For full details, see [RELEASE_NOTES_1.1.0.md](RELEASE_NOTES_1.1.0.md).
+
 ## [1.0.3] - 2026-03-12
 
 ### Added

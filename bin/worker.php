@@ -186,7 +186,6 @@ $clientConfiguration = new ClientConfiguration(
     reconnectBackoffMaxMs: envInt('NATS_RECONNECT_BACKOFF_MAX_MS', 1000),
     reconnectBackoffMultiplier: envFloat('NATS_RECONNECT_BACKOFF_MULTIPLIER', 2.0),
     reconnectJitterFraction: envFloat('NATS_RECONNECT_JITTER', 0.2),
-    reconnectServers: $reconnectServersRaw,
     servers: $seedServers,
 );
 $eventDispatcher = new EventDispatcher();

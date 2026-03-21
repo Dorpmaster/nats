@@ -22,7 +22,6 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
         private int $reconnectBackoffMaxMs = 1_000,
         private float $reconnectBackoffMultiplier = 2.0,
         private float $reconnectJitterFraction = 0.2,
-        private array $reconnectServers = [],
         private array $servers = [],
         private int $deadServerCooldownMs = 2_000,
         private int $maxWriteBufferMessages = 10_000,
@@ -80,12 +79,6 @@ final readonly class ClientConfiguration implements ClientConfigurationInterface
     public function getReconnectJitterFraction(): float
     {
         return $this->reconnectJitterFraction;
-    }
-
-    /** @return list<string> */
-    public function getReconnectServers(): array
-    {
-        return $this->reconnectServers;
     }
 
     /** @return list<ServerAddress> */
