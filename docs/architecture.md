@@ -81,6 +81,46 @@ the state-change event is emitted.
 observe a lifecycle-consistent client for the new state, not a partially
 transitioned one.
 
+## Lifecycle Timelines
+
+### `connect()`
+
+```text
+connect()
+  -> state = CONNECTING
+  -> open transport
+  -> state = CONNECTED
+  -> apply connected effects (scheduler reset, write buffer start+pause)
+  -> receive INFO
+  -> send CONNECT
+  -> send PING
+  -> receive PONG
+  -> completeHandshake()
+  -> resume write buffer / start ping
+  -> dispatch connectionStatusChanged(CONNECTED)
+```
+
+### reconnect
+
+```text
+failure detected
+  -> state = RECONNECTING
+  -> apply reconnect effects (stop ping, init reconnect epoch, stop scheduler, switch write buffer mode)
+  -> dispatch connectionStatusChanged(RECONNECTING)
+  -> reconnect attempts + backoff
+  -> open succeeds
+  -> state = CONNECTED
+  -> apply connected effects (scheduler reset, write buffer start+pause)
+  -> receive INFO
+  -> send CONNECT
+  -> send PING
+  -> receive PONG
+  -> completeHandshake()
+  -> replay subscriptions if reconnect
+  -> resume write buffer / start ping
+  -> dispatch connectionStatusChanged(CONNECTED)
+```
+
 ## Design Constraints
 
 - No unbounded retries without explicit config.
