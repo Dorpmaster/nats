@@ -1,12 +1,12 @@
 # NATS PHP Client
-Stable: 1.1.0
+Stable: 1.1.1
 
 Asynchronous NATS client for PHP 8.5+ built on AMPHP 3.x.
 
 This library provides a production-oriented Core NATS client with reconnect orchestration, cluster failover, TLS, bounded buffering, and deterministic test coverage for failure scenarios.
 
-Status: **stable** (`v1.1.0`, minor release line).  
-Release details: [GitHub Release 1.1.0](https://github.com/Dorpmaster/nats/releases/tag/1.1.0) | [Release Notes](RELEASE_NOTES_1.1.0.md)
+Status: **stable** (`v1.1.1`, patch release line).  
+Release details: [GitHub Release 1.1.1](https://github.com/Dorpmaster/nats/releases/tag/1.1.1) | [Release Notes](RELEASE_NOTES_1.1.1.md)
 
 Recent transport execution model improvements:
 
@@ -14,6 +14,7 @@ Recent transport execution model improvements:
 - bounded inbound dispatch scheduler
 - improved transport stability under load
 - simplified reconnect seed-server configuration around `servers`
+- post-effects lifecycle event dispatch with post-handshake `CONNECTED` semantics
 
 ## What This Library Provides
 
@@ -435,6 +436,7 @@ make test
 - Versioning follows SemVer.
 - Public API includes classes and interfaces under `src/Domain/*` and documented entry points (`Client`, `ConnectionConfiguration`, `ClientConfiguration`, protocol message contracts).
 - Internal behavior may evolve in minor/patch releases while preserving API compatibility.
+- Latest patch release (`1.1.1`) improves lifecycle consistency and state transition event semantics.
 
 ## Documentation Index
 
@@ -460,10 +462,11 @@ MIT. See [LICENSE](LICENSE).
 
 ## Release
 
-Current stable release: **1.1.0**
+Current stable release: **1.1.1**
 
 See:
 - [CHANGELOG.md](CHANGELOG.md)
+- [RELEASE_NOTES_1.1.1.md](RELEASE_NOTES_1.1.1.md)
 - [RELEASE_NOTES_1.1.0.md](RELEASE_NOTES_1.1.0.md)
 - [RELEASE_NOTES_1.0.3.md](RELEASE_NOTES_1.0.3.md)
 - [RELEASE_NOTES_1.0.2.md](RELEASE_NOTES_1.0.2.md)

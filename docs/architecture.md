@@ -64,6 +64,63 @@ This library separates orchestration concerns from transport and buffering logic
 7. On reconnect success, the same readiness barrier is applied again; restored subscriptions are replayed before buffered application frames are flushed.
 8. `drain()` enters `DRAINING`, stops accepting new application inbound callbacks, waits bounded time for active + pending dispatch drain, then flushes and unsubscribes before closing to `CLOSED`.
 
+## Transition Orchestration
+
+State transitions are applied in three ordered stages:
+
+1. validate + state commit
+2. internal transition effects
+3. state-change event dispatch
+
+`Client::transitionTo()` is only the state-machine commit step. Lifecycle
+orchestration such as reconnect token updates, ping start/stop, write-buffer
+mode changes, and inbound scheduler lifecycle is applied after commit and before
+the state-change event is emitted.
+
+`connectionStatusChanged` is therefore a post-effects event: listeners should
+observe a lifecycle-consistent client for the new state, not a partially
+transitioned one.
+
+## Lifecycle Timelines
+
+### `connect()`
+
+```text
+connect()
+  -> state = CONNECTING
+  -> open transport
+  -> state = CONNECTED
+  -> apply connected effects (scheduler reset, write buffer start+pause)
+  -> receive INFO
+  -> send CONNECT
+  -> send PING
+  -> receive PONG
+  -> completeHandshake()
+  -> resume write buffer / start ping
+  -> dispatch connectionStatusChanged(CONNECTED)
+```
+
+### reconnect
+
+```text
+failure detected
+  -> state = RECONNECTING
+  -> apply reconnect effects (stop ping, init reconnect epoch, stop scheduler, switch write buffer mode)
+  -> dispatch connectionStatusChanged(RECONNECTING)
+  -> reconnect attempts + backoff
+  -> open succeeds
+  -> state = CONNECTED
+  -> apply connected effects (scheduler reset, write buffer start+pause)
+  -> receive INFO
+  -> send CONNECT
+  -> send PING
+  -> receive PONG
+  -> completeHandshake()
+  -> replay subscriptions if reconnect
+  -> resume write buffer / start ping
+  -> dispatch connectionStatusChanged(CONNECTED)
+```
+
 ## Design Constraints
 
 - No unbounded retries without explicit config.

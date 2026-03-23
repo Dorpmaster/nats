@@ -65,6 +65,7 @@ final class Client implements ClientInterface
     private int $reconnectBackoffEpoch                              = 0;
     private int|null $activeReconnectBackoffEpoch                   = null;
     private bool $handshakeReady                                    = false;
+    private bool $connectedEventPending                             = false;
     private bool $awaitingInitialPong                               = false;
     private bool $replaySubscriptionsOnReady                        = false;
     /** @var array<string, string> */
@@ -179,7 +180,7 @@ final class Client implements ClientInterface
             return;
         }
 
-        $this->transitionTo(ClientState::CONNECTING, 'connect() started');
+        $this->moveToState(ClientState::CONNECTING, 'connect() started');
 
         $server = $this->selectServerForConnect();
 
@@ -190,7 +191,7 @@ final class Client implements ClientInterface
             }
             $this->logger?->debug('Connection has successfully opened');
         } catch (ConnectionException $exception) {
-            $this->transitionTo(ClientState::CLOSED, 'open() failed');
+            $this->moveToState(ClientState::CLOSED, 'open() failed');
 
             $this->logger?->error($exception->getMessage(), [
                 'exception' => $exception,
@@ -199,7 +200,7 @@ final class Client implements ClientInterface
             throw $exception;
         }
 
-        $this->transitionTo(ClientState::CONNECTED, 'open() succeeded');
+        $this->moveToState(ClientState::CONNECTED, 'open() succeeded');
 
         $this->logger?->debug('Starting a microtask that processes the messages');
         EventLoop::queue(function () {
@@ -348,7 +349,7 @@ final class Client implements ClientInterface
         }
 
         if ($this->status !== ClientState::DRAINING) {
-            $this->transitionTo(ClientState::DRAINING, 'drain() started');
+            $this->moveToState(ClientState::DRAINING, 'drain() started');
         }
 
         $this->inboundDispatchScheduler->stop();
@@ -358,7 +359,7 @@ final class Client implements ClientInterface
 
         $this->unsubscribeAll();
         $this->connection->close();
-        $this->transitionTo(ClientState::CLOSED, 'drain() finished');
+        $this->moveToState(ClientState::CLOSED, 'drain() finished');
 
         $this->logger?->info('Connection has successfully closed');
     }
@@ -535,7 +536,7 @@ final class Client implements ClientInterface
      */
     private function waitForStatus(ClientState $status, float $timeout = 10): ClientState
     {
-        if ($this->status === $status) {
+        if ($this->isStateObservable($status)) {
             return $this->status;
         }
 
@@ -590,13 +591,6 @@ final class Client implements ClientInterface
             }
         );
 
-        if ($this->status === $status) {
-            $cancellation->unsubscribe($cancellationId);
-            $this->eventDispatcher->unsubscribe($subId);
-
-            return $this->status;
-        }
-
         $status = $suspension->suspend();
         if (!$status instanceof ClientState) {
             throw new LogicException('Connection status event payload must be an instance of ClientState');
@@ -618,7 +612,7 @@ final class Client implements ClientInterface
                 'exception' => $reason,
             ]);
 
-            $this->transitionTo(ClientState::CLOSED, 'reconnect disabled');
+            $this->moveToState(ClientState::CLOSED, 'reconnect disabled');
 
             return false;
         }
@@ -627,7 +621,7 @@ final class Client implements ClientInterface
             return false;
         }
 
-        $this->transitionTo(ClientState::RECONNECTING, 'reconnect started');
+        $this->moveToState(ClientState::RECONNECTING, 'reconnect started');
 
         $maxAttempts        = $this->configuration->getMaxReconnectAttempts();
         $attempt            = 0; // Count only real open() attempts.
@@ -640,7 +634,7 @@ final class Client implements ClientInterface
                     'exception' => $reason,
                 ]);
 
-                $this->transitionTo(ClientState::CLOSED, 'reconnect attempts exhausted');
+                $this->moveToState(ClientState::CLOSED, 'reconnect attempts exhausted');
 
                 return false;
             }
@@ -665,7 +659,7 @@ final class Client implements ClientInterface
                 if ($server !== null) {
                     $this->serverPool->setCurrent($server);
                 }
-                $this->transitionTo(ClientState::CONNECTED, 'reconnect succeeded');
+                $this->moveToState(ClientState::CONNECTED, 'reconnect succeeded');
                 $this->replaySubscriptionsOnReady = true;
 
                 return true;
@@ -777,10 +771,21 @@ final class Client implements ClientInterface
         }
     }
 
-    private function transitionTo(ClientState $targetState, string $reason = ''): void
+    private function moveToState(ClientState $targetState, string $reason = ''): void
+    {
+        $previous = $this->transitionTo($targetState, $reason);
+        if ($previous === null) {
+            return;
+        }
+
+        $this->applyTransitionEffects($previous, $targetState);
+        $this->dispatchTransitionEvent($targetState);
+    }
+
+    private function transitionTo(ClientState $targetState, string $reason = ''): ClientState|null
     {
         if ($this->status === $targetState) {
-            return;
+            return null;
         }
 
         $allowedTransitions = [
@@ -808,43 +813,96 @@ final class Client implements ClientInterface
             'to' => $this->status->value,
             'reason' => $reason,
         ]);
-        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $this->status);
 
-        if ($targetState === ClientState::CONNECTED) {
-            $this->inboundDispatchScheduler->reset();
-            $this->handshakeReady      = false;
-            $this->awaitingInitialPong = false;
-            if ($previous !== ClientState::RECONNECTING) {
-                $this->replaySubscriptionsOnReady = false;
-            }
-            $this->writeBuffer->start($this->connection);
-            $this->writeBuffer->pause();
-            if ($previous === ClientState::RECONNECTING) {
-                $this->metricsCollector->increment('reconnect_count', 1);
-            }
-        } elseif ($previous === ClientState::CONNECTED) {
+        return $previous;
+    }
+
+    private function applyTransitionEffects(ClientState $from, ClientState $to): void
+    {
+        if ($to !== ClientState::CONNECTED) {
+            $this->connectedEventPending = false;
+        }
+
+        if ($from === ClientState::CONNECTED && $to !== ClientState::CONNECTED) {
             $this->pingService->stop();
         }
 
-        if ($targetState === ClientState::RECONNECTING) {
-            $this->reconnectBackoffCancellation?->cancel();
-            $this->reconnectBackoffCancellation = new DeferredCancellation();
-            $this->reconnectBackoffEpoch++;
-            $this->activeReconnectBackoffEpoch = $this->reconnectBackoffEpoch;
-        } elseif ($previous === ClientState::RECONNECTING) {
-            $this->reconnectBackoffCancellation?->cancel();
-            $this->reconnectBackoffCancellation = null;
-            $this->activeReconnectBackoffEpoch  = null;
+        if ($from === ClientState::RECONNECTING && $to !== ClientState::RECONNECTING) {
+            $this->stopReconnectBackoffContext();
         }
 
-        if (in_array($targetState, [ClientState::RECONNECTING, ClientState::CLOSED], true)) {
-            $this->inboundDispatchScheduler->stop();
-            if ($targetState === ClientState::RECONNECTING && $this->configuration->isBufferWhileReconnecting()) {
-                $this->writeBuffer->detach();
-            } else {
-                $this->writeBuffer->stop();
-            }
+        match ($to) {
+            ClientState::CONNECTED => $this->applyConnectedTransitionEffects($from),
+            ClientState::RECONNECTING => $this->applyReconnectingTransitionEffects(),
+            ClientState::DRAINING => $this->applyDrainingTransitionEffects(),
+            ClientState::CLOSED => $this->applyClosedTransitionEffects(),
+            default => null,
+        };
+    }
+
+    private function applyConnectedTransitionEffects(ClientState $from): void
+    {
+        $this->inboundDispatchScheduler->reset();
+        $this->handshakeReady        = false;
+        $this->connectedEventPending = true;
+        $this->awaitingInitialPong   = false;
+        if ($from !== ClientState::RECONNECTING) {
+            $this->replaySubscriptionsOnReady = false;
         }
+
+        $this->writeBuffer->start($this->connection);
+        $this->writeBuffer->pause();
+        if ($from === ClientState::RECONNECTING) {
+            $this->metricsCollector->increment('reconnect_count', 1);
+        }
+    }
+
+    private function applyReconnectingTransitionEffects(): void
+    {
+        $this->startReconnectBackoffContext();
+        $this->inboundDispatchScheduler->stop();
+        if ($this->configuration->isBufferWhileReconnecting()) {
+            $this->writeBuffer->detach();
+
+            return;
+        }
+
+        $this->writeBuffer->stop();
+    }
+
+    private function applyDrainingTransitionEffects(): void
+    {
+        $this->inboundDispatchScheduler->stop();
+    }
+
+    private function applyClosedTransitionEffects(): void
+    {
+        $this->inboundDispatchScheduler->stop();
+        $this->writeBuffer->stop();
+    }
+
+    private function dispatchTransitionEvent(ClientState $state): void
+    {
+        if ($state === ClientState::CONNECTED) {
+            return;
+        }
+
+        $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, $state);
+    }
+
+    private function startReconnectBackoffContext(): void
+    {
+        $this->reconnectBackoffCancellation?->cancel();
+        $this->reconnectBackoffCancellation = new DeferredCancellation();
+        $this->reconnectBackoffEpoch++;
+        $this->activeReconnectBackoffEpoch = $this->reconnectBackoffEpoch;
+    }
+
+    private function stopReconnectBackoffContext(): void
+    {
+        $this->reconnectBackoffCancellation?->cancel();
+        $this->reconnectBackoffCancellation = null;
+        $this->activeReconnectBackoffEpoch  = null;
     }
 
     private function enqueueOutbound(NatsProtocolMessageInterface $message, bool $allowBufferWhileReconnecting = false): void
@@ -911,6 +969,11 @@ final class Client implements ClientInterface
                 },
             );
         }
+
+        if ($this->status === ClientState::CONNECTED && $this->connectedEventPending) {
+            $this->connectedEventPending = false;
+            $this->eventDispatcher->dispatch(self::STATUS_EVENT_NAME, ClientState::CONNECTED);
+        }
     }
 
     private function restoreSubscriptionsImmediately(): void
@@ -939,6 +1002,15 @@ final class Client implements ClientInterface
     private function isReconnectBackoffContextActive(int $epoch): bool
     {
         return $this->status === ClientState::RECONNECTING && $this->activeReconnectBackoffEpoch === $epoch;
+    }
+
+    private function isStateObservable(ClientState $state): bool
+    {
+        if ($this->status !== $state) {
+            return false;
+        }
+
+        return $state !== ClientState::CONNECTED || !$this->connectedEventPending;
     }
 
     private function discoverServersFromInfo(InfoMessageInterface $message): void

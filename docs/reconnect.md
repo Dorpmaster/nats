@@ -52,6 +52,10 @@ Reconnect wakeups are protected by epoch:
 - each wait captures epoch;
 - stale wakeup (`epoch` changed or state is no longer `RECONNECTING`) exits with no side effects.
 
+`connectionStatusChanged` for `RECONNECTING` is emitted only after this backoff
+context is initialized, so listeners do not observe `RECONNECTING` with stale
+or missing reconnect lifecycle internals.
+
 ## Dead Server Policy
 
 - reconnect tries current server first;
@@ -75,3 +79,40 @@ Reconnect wakeups are protected by epoch:
 - after reconnect, newly parsed inbound messages are scheduled with the same bounded async dispatch path;
 - callback exceptions remain isolated and do not by themselves terminate reconnect processing;
 - lifecycle shutdown (`drain()/disconnect()`) stops scheduling new inbound callbacks and waits bounded time for active + pending dispatch drain before closing.
+
+## State-Change Event Semantics
+
+State-change events are post-effects events.
+
+- `RECONNECTING` is dispatched after reconnect token/backoff state and write-path mode are already updated.
+- `CONNECTED` is dispatched after the protocol readiness barrier completes, not immediately after low-level socket open.
+- `CLOSED` is dispatched after lifecycle services are stopped for the closed state.
+
+## Reconnect Step-by-Step Timeline
+
+This is the effective reconnect timeline observed by the current client:
+
+1. Failure is detected from read loop, parser path, ping timeout, or write buffer failure handler.
+2. Client commits `RECONNECTING`.
+3. Internal reconnect effects run before any state-change event:
+   - ping stops
+   - reconnect backoff epoch/cancellation context is created
+   - inbound scheduler stops accepting new application callbacks
+   - write buffer switches to reconnect mode
+4. `connectionStatusChanged(RECONNECTING)` is dispatched.
+5. Reconnect attempts run with current-server-first policy and epoch-guarded backoff.
+6. When `open()` succeeds, client commits `CONNECTED`.
+7. Internal connected effects run:
+   - scheduler reset
+   - handshake flags reset
+   - write buffer starts in paused mode
+8. Reader loop re-enters protocol readiness barrier:
+   - receive `INFO`
+   - send `CONNECT`
+   - send `PING`
+   - receive `PONG`
+9. `completeHandshake()` resumes write buffer, replays subscriptions if needed, and starts ping service.
+10. Only then is `connectionStatusChanged(CONNECTED)` dispatched.
+
+This is why `CONNECTED` event listeners can safely treat the client as
+post-ready rather than merely post-open.
