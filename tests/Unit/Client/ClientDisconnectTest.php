@@ -33,7 +33,7 @@ final class ClientDisconnectTest extends TestCase
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
-            $isClosed = true;
+            $isClosed     = true;
             $receiveCalls = 0;
 
             $connection = self::createStub(ConnectionInterface::class);
@@ -70,10 +70,10 @@ final class ClientDisconnectTest extends TestCase
                     new ConnectMessage(new ConnectInfo(false, false, false, 'php', PHP_VERSION)),
                     null,
                 );
-            $storage           = self::createStub(SubscriptionStorageInterface::class);
-            $configuration     = new ClientConfiguration();
-            $cancellation      = new NullCancellation();
-            $eventDispatcher   = new EventDispatcher();
+            $storage         = self::createStub(SubscriptionStorageInterface::class);
+            $configuration   = new ClientConfiguration();
+            $cancellation    = new NullCancellation();
+            $eventDispatcher = new EventDispatcher();
 
             $client = new Client(
                 configuration: $configuration,

@@ -33,7 +33,7 @@ final class ClientConnectTest extends TestCase
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
-            $isClosed = true;
+            $isClosed     = true;
             $receiveCalls = 0;
 
             $connection = self::createStub(ConnectionInterface::class);

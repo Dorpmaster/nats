@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.1] - 2026-03-23
+
+### Changed
+
+- Refactored client state transition orchestration to separate state commit from lifecycle side effects.
+- State change events are now dispatched only after internal lifecycle effects have been applied.
+- `CONNECTED` notifications now have post-handshake semantics.
+
+### Fixed
+
+- Prevented listeners from observing partially-applied lifecycle state during `CONNECTED`, `RECONNECTING`, and `DRAINING` transitions.
+- Improved lifecycle consistency for reconnect, drain, write buffer, ping service, and inbound scheduler orchestration.
+
+### Notes
+
+For full details, see [RELEASE_NOTES_1.1.1.md](RELEASE_NOTES_1.1.1.md).
+
 ## [1.1.0] - 2026-03-21
 
 ### Breaking
