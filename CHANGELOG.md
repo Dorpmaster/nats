@@ -13,6 +13,7 @@ All notable changes to this project are documented in this file.
 
 - Subscription metadata now retains queue-group information for reconnect replay.
 - Queue subscriptions follow the existing handshake barrier and buffered outbound path semantics.
+- Added integration coverage for queue-group load balancing, regular subscription coexistence, and reconnect replay.
 
 ## [1.1.1] - 2026-03-23
 

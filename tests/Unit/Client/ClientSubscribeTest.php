@@ -91,7 +91,7 @@ final class ClientSubscribeTest extends TestCase
             $storage->expects(self::once())
                 ->method('add')
                 ->with(
-                    self::isType('string'),
+                    self::isString(),
                     self::isInstanceOf(\Closure::class),
                     'workers',
                 );

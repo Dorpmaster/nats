@@ -102,12 +102,13 @@ $client->disconnect();
 Queue subscription example:
 
 ```php
-$client->subscribe('updates', function ($msg) {
+$client->subscribe('updates', function (MsgMessageInterface $message): void {
     // ...
 }, 'workers');
 ```
 
-Queue group subscriptions provide load balancing semantics: only one consumer from the same group receives a given message.
+Queue group subscriptions provide load balancing semantics: messages are balanced between subscribers in the same queue group.
+Regular subscriptions without a queue group still receive broadcast delivery for every published message.
 
 ## Docker Examples
 
