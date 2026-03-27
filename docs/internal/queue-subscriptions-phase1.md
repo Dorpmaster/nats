@@ -228,4 +228,4 @@ Files confirmed not to require wire-format changes:
 
 ## 2.10 Proposed API
 
-`subscribe(string $subject, Closure $closure, ?string $queueGroup = null): string`
+`subscribe(string $subject, \Closure $closure, ?string $queueGroup = null): string`

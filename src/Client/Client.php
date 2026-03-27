@@ -383,9 +383,8 @@ final class Client implements ClientInterface
      * @throws Throwable
      * @throws ConnectionException
      */
-    public function subscribe(string $subject, callable $handler, string|null $queueGroup = null): string
+    public function subscribe(string $subject, Closure $closure, string|null $queueGroup = null): string
     {
-        $closure = $handler instanceof Closure ? $handler : Closure::fromCallable($handler);
         $sid     = $this->subscriptionIdHelper->generateId();
         $message = new SubMessage($subject, $sid, $queueGroup);
         $this->logger?->debug('Subscribing', [
