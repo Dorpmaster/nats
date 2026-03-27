@@ -6,14 +6,19 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- Added optional queue-group support to `Client::subscribe()`.
-- Queue subscriptions now generate `SUB <subject> <queue-group> <sid>` when a queue group is provided.
+- Queue group support for Core NATS subscriptions.
+- Backward-compatible `subscribe(string $subject, \Closure $closure, ?string $queueGroup = null): string` API.
+- Integration coverage for queue group load balancing and reconnect replay.
 
 ### Changed
 
-- Subscription metadata now retains queue-group information for reconnect replay.
-- Queue subscriptions follow the existing handshake barrier and buffered outbound path semantics.
-- Added integration coverage for queue-group load balancing, regular subscription coexistence, and reconnect replay.
+- Subscription metadata now stores queue group information.
+- Reconnect replay restores queue subscriptions with their queue group.
+- Buffered subscribe path now preserves queue group metadata before READY.
+
+### Notes
+
+For full details, see [RELEASE_NOTES_1.2.0.md](RELEASE_NOTES_1.2.0.md).
 
 ## [1.1.1] - 2026-03-23
 
