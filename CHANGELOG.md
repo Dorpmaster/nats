@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.2.0] - 2026-03-27
+
+### Added
+
+- Queue group support for Core NATS subscriptions.
+- Backward-compatible `subscribe(string $subject, \Closure $closure, ?string $queueGroup = null): string` API.
+- Integration coverage for queue group load balancing and reconnect replay.
+
+### Changed
+
+- Subscription metadata now stores queue group information.
+- Reconnect replay restores queue subscriptions with their queue group.
+- Buffered subscribe path now preserves queue group metadata before READY.
+
+### Notes
+
+For full details, see [RELEASE_NOTES_1.2.0.md](RELEASE_NOTES_1.2.0.md).
+
 ## [1.1.1] - 2026-03-23
 
 ### Changed

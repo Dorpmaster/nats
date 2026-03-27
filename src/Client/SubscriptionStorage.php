@@ -11,14 +11,22 @@ final class SubscriptionStorage implements SubscriptionStorageInterface
 {
     private array $storage = [];
 
-    public function add(string $sid, Closure $closure): void
+    public function add(string $sid, Closure $closure, string|null $queueGroup = null): void
     {
-        $this->storage[$sid] = $closure;
+        $this->storage[$sid] = [
+            'closure' => $closure,
+            'queueGroup' => $queueGroup,
+        ];
     }
 
     public function get(string $sid): Closure|null
     {
-        return $this->storage[$sid] ?? null;
+        return $this->storage[$sid]['closure'] ?? null;
+    }
+
+    public function getQueueGroup(string $sid): string|null
+    {
+        return $this->storage[$sid]['queueGroup'] ?? null;
     }
 
     public function remove(string $sid): void
@@ -31,6 +39,9 @@ final class SubscriptionStorage implements SubscriptionStorageInterface
     /** @return array<string, Closure> */
     public function all(): array
     {
-        return $this->storage;
+        return array_map(
+            static fn (array $subscription): Closure => $subscription['closure'],
+            $this->storage,
+        );
     }
 }

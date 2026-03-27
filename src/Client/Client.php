@@ -68,7 +68,7 @@ final class Client implements ClientInterface
     private bool $connectedEventPending                             = false;
     private bool $awaitingInitialPong                               = false;
     private bool $replaySubscriptionsOnReady                        = false;
-    /** @var array<string, string> */
+    /** @var array<string, array{subject: string, queueGroup: string|null}> */
     private array $subscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
     private readonly ReconnectBackoffServiceInterface $reconnectBackoffService;
@@ -383,17 +383,21 @@ final class Client implements ClientInterface
      * @throws Throwable
      * @throws ConnectionException
      */
-    public function subscribe(string $subject, Closure $closure): string
+    public function subscribe(string $subject, Closure $closure, string|null $queueGroup = null): string
     {
         $sid     = $this->subscriptionIdHelper->generateId();
-        $message = new SubMessage($subject, $sid);
+        $message = new SubMessage($subject, $sid, $queueGroup);
         $this->logger?->debug('Subscribing', [
             'subject' => $subject,
             'sid' => $sid,
+            'queue_group' => $queueGroup,
         ]);
 
-        $this->storage->add($sid, $closure);
-        $this->subscriptionsBySid[$sid] = $subject;
+        $this->storage->add($sid, $closure, $queueGroup);
+        $this->subscriptionsBySid[$sid] = [
+            'subject' => $subject,
+            'queueGroup' => $queueGroup,
+        ];
         $this->logger?->debug('Subscription saved to storage');
 
         try {
@@ -978,8 +982,12 @@ final class Client implements ClientInterface
 
     private function restoreSubscriptionsImmediately(): void
     {
-        foreach ($this->subscriptionsBySid as $sid => $subject) {
-            $this->sendImmediate(new SubMessage($subject, $sid));
+        foreach ($this->subscriptionsBySid as $sid => $subscription) {
+            $this->sendImmediate(new SubMessage(
+                $subscription['subject'],
+                $sid,
+                $subscription['queueGroup'],
+            ));
         }
     }
 

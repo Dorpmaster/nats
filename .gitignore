@@ -3,3 +3,4 @@ vendor
 .phpunit.result.cache
 phpunit.coverage
 collect_context.zsh
+composer.lock
