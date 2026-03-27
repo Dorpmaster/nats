@@ -22,7 +22,7 @@ final class ClientSubscribeTest extends TestCase
 {
     use AsyncTestTools;
 
-    public function testSubscribe(): void
+    public function testSubscribeWithoutQueueGroupGeneratesRegularSUB(): void
     {
         $this->setTimeout(30);
         $this->runAsyncTest(function () {
@@ -32,6 +32,7 @@ final class ClientSubscribeTest extends TestCase
                 ->method('enqueue')
                 ->with(self::callback(static function (mixed $frame): bool {
                     self::assertInstanceOf(SubMessage::class, $frame->message);
+                    self::assertNull($frame->message->getQueueGroup());
 
                     return true;
                 }))
@@ -62,6 +63,54 @@ final class ClientSubscribeTest extends TestCase
             $this->setState($client, ClientState::CONNECTED);
 
             $sid = $client->subscribe('test', static fn() => null);
+
+            self::assertNotEmpty($sid);
+        });
+    }
+
+    public function testSubscribeWithQueueGroupGeneratesQueueSUB(): void
+    {
+        $this->setTimeout(30);
+        $this->runAsyncTest(function () {
+            $writeBuffer = self::createMock(WriteBufferInterface::class);
+            $writeBuffer->method('setFailureHandler');
+            $writeBuffer->expects(self::once())
+                ->method('enqueue')
+                ->with(self::callback(static function (mixed $frame): bool {
+                    self::assertInstanceOf(SubMessage::class, $frame->message);
+                    self::assertSame('workers', $frame->message->getQueueGroup());
+                    self::assertStringStartsWith('SUB test workers ', (string) $frame->message);
+
+                    return true;
+                }))
+                ->willReturn(true);
+
+            $messageDispatcher = self::createStub(MessageDispatcherInterface::class);
+
+            $storage = self::createMock(SubscriptionStorageInterface::class);
+            $storage->expects(self::once())
+                ->method('add')
+                ->with(
+                    self::isType('string'),
+                    self::isInstanceOf(\Closure::class),
+                    'workers',
+                );
+            $storage->expects(self::never())
+                ->method('remove');
+
+            $client = new Client(
+                configuration: new ClientConfiguration(),
+                cancellation: new NullCancellation(),
+                connection: self::createStub(ConnectionInterface::class),
+                eventDispatcher: new EventDispatcher(),
+                messageDispatcher: $messageDispatcher,
+                storage: $storage,
+                logger: $this->logger,
+                writeBuffer: $writeBuffer,
+            );
+            $this->setState($client, ClientState::CONNECTED);
+
+            $sid = $client->subscribe('test', static fn() => null, 'workers');
 
             self::assertNotEmpty($sid);
         });

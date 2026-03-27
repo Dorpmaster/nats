@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.2.0] - 2026-03-27
+
+### Added
+
+- Added optional queue-group support to `Client::subscribe()`.
+- Queue subscriptions now generate `SUB <subject> <queue-group> <sid>` when a queue group is provided.
+
+### Changed
+
+- Subscription metadata now retains queue-group information for reconnect replay.
+- Queue subscriptions follow the existing handshake barrier and buffered outbound path semantics.
+
 ## [1.1.1] - 2026-03-23
 
 ### Changed

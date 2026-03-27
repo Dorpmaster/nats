@@ -99,6 +99,16 @@ $client->unsubscribe($sid);
 $client->disconnect();
 ```
 
+Queue subscription example:
+
+```php
+$client->subscribe('updates', function ($msg) {
+    // ...
+}, 'workers');
+```
+
+Queue group subscriptions provide load balancing semantics: only one consumer from the same group receives a given message.
+
 ## Docker Examples
 
 Default container command runs Core worker example:

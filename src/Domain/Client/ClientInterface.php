@@ -27,7 +27,7 @@ interface ClientInterface
 
     public function waitForTermination(): void;
 
-    public function subscribe(string $subject, \Closure $closure): string;
+    public function subscribe(string $subject, callable $handler, string|null $queueGroup = null): string;
 
     public function unsubscribe(string $sid): void;
 

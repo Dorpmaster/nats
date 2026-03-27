@@ -70,6 +70,39 @@ final class ClientHandshakeBarrierTest extends TestCase
         });
     }
 
+    public function testQueueSubscriptionBufferedUntilReady(): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function (): void {
+            $receiveCalls = 0;
+            $connection   = new ScriptedConnection(
+                onReceive: static function () use (&$receiveCalls) {
+                    return match ($receiveCalls++) {
+                        0 => new InfoMessage(self::INFO_PAYLOAD),
+                        1 => new PongMessage(),
+                        default => throw new CancelledException(),
+                    };
+                },
+            );
+
+            $client = $this->createClient($connection);
+
+            $client->connect();
+            $sid = $client->subscribe('updates', static fn () => null, 'workers');
+
+            self::assertSame([], $connection->sentWire());
+
+            $this->forceTick();
+            $this->forceTick();
+
+            self::assertSame([
+                (string) new ConnectMessage($this->connectInfo()),
+                (string) new PingMessage(),
+                (string) new SubMessage('updates', $sid, 'workers'),
+            ], $connection->sentWire());
+        });
+    }
+
     public function testRequestBuffersInboxSubscriptionAndHpubUntilReady(): void
     {
         $this->setTimeout(10);
@@ -266,6 +299,63 @@ final class ClientHandshakeBarrierTest extends TestCase
                 true,
             );
             self::assertNotFalse($bufferedPublishIndex);
+        });
+    }
+
+    public function testQueueSubscriptionReplayedOnReconnect(): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function (): void {
+            $openCalls     = 0;
+            $receiveCalls  = 0;
+            $delayStrategy = new ManualDelayStrategy();
+
+            $connection = new ScriptedConnection(
+                onOpen: static function (ScriptedConnection $connection) use (&$openCalls): void {
+                    $openCalls++;
+                    $connection->markOpen();
+                },
+                onReceive: static function (ScriptedConnection $connection) use (&$receiveCalls) {
+                    return match ($receiveCalls++) {
+                        0 => new InfoMessage(self::INFO_PAYLOAD),
+                        1 => new PongMessage(),
+                        2 => $connection->closeAndReturnNull(),
+                        3 => new InfoMessage(self::INFO_PAYLOAD),
+                        4 => new PongMessage(),
+                        default => throw new CancelledException(),
+                    };
+                },
+            );
+
+            $client = $this->createClient(
+                $connection,
+                configuration: new ClientConfiguration(
+                    reconnectEnabled: true,
+                    maxReconnectAttempts: 1,
+                    reconnectBackoffInitialMs: 1,
+                    reconnectBackoffMaxMs: 1,
+                    reconnectJitterFraction: 0.0,
+                    bufferWhileReconnecting: true,
+                ),
+                delayStrategy: $delayStrategy,
+            );
+
+            $client->connect();
+            $sid = $client->subscribe('updates', static fn () => null, 'workers');
+            $this->forceTick();
+            $this->forceTick();
+            $this->forceTick();
+
+            $delayStrategy->releaseNext();
+            $this->forceTick();
+            $this->forceTick();
+            $this->forceTick();
+            $this->forceTick();
+
+            self::assertContains(
+                (string) new SubMessage('updates', $sid, 'workers'),
+                $connection->sentWire(),
+            );
         });
     }
 

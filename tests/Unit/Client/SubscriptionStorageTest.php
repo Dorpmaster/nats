@@ -18,9 +18,11 @@ final class SubscriptionStorageTest extends TestCase
 
         $storage->add('test', $closureOne);
         self::assertSame($closureOne, $storage->get('test'));
+        self::assertNull($storage->getQueueGroup('test'));
 
         $storage->add('test', $closureTwo);
         self::assertSame($closureTwo, $storage->get('test'));
+        self::assertNull($storage->getQueueGroup('test'));
     }
 
     public function testGet(): void
@@ -31,6 +33,7 @@ final class SubscriptionStorageTest extends TestCase
 
         $storage->add('test', $closure);
         self::assertSame($closure, $storage->get('test'));
+        self::assertNull($storage->getQueueGroup('test'));
     }
 
     public function testRemove(): void
@@ -44,5 +47,18 @@ final class SubscriptionStorageTest extends TestCase
 
         $storage->remove('test');
         self::assertNull($storage->get('test'));
+        self::assertNull($storage->getQueueGroup('test'));
+    }
+
+    public function testQueueGroupIsStoredInSubscription(): void
+    {
+        $storage = new SubscriptionStorage();
+
+        $closure = static fn(): int => 1;
+
+        $storage->add('test', $closure, 'workers');
+
+        self::assertSame($closure, $storage->get('test'));
+        self::assertSame('workers', $storage->getQueueGroup('test'));
     }
 }
