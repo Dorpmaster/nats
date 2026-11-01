@@ -390,3 +390,7 @@ integration-jetstream-cluster-tls: build
 		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
 		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
 		nats-client composer integration:jetstream:cluster:tls
+
+.PHONY: integration-tls-self-signed
+integration-tls-self-signed: build
+	python3 tests/Support/tls/run-self-signed.py

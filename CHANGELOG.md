@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Apply `allowSelfSigned` to PHP's `allow_self_signed` stream option without lowering TLS security levels. Keep peer/name verification, CA, minimum TLS, ALPN and mTLS settings intact across reconnect/failover, reject unsupported sockets explicitly, and close/detach failed transports before retry.
+
 - Process asynchronous INFO as server/topology updates without repeating CONNECT or handshake PING. Client owns handshake state per transport, preserving readiness, subscription replay order, ping monitoring and safe logs across updates and handshake-write failures.
 
 - Read JetStream delivery counts from validated classic or domain/account ACK subjects for MSG and HMSG, independently of opaque extension tokens including numeric tails. User `Nats-Num-Delivered` headers no longer influence automatic DROP_NEW termination; malformed or overflowing metadata yields an unknown count without interrupting message delivery.

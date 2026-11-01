@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Connection;
 
+use Amp\ByteStream\ResourceStream;
 use Amp\Cancellation;
 use Amp\CancelledException;
 use Amp\Pipeline\ConcurrentIterator;
@@ -48,19 +49,20 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
         }
 
         $url                = $this->createConnectUri();
-        $context            = $this->createConnectContext();
         $tlsConfiguration   = $this->configuration->getTlsConfiguration();
         $prefetchedMessages = [];
 
         try {
+            $context = $this->createConnectContext();
             $this->logger?->debug('Starting to open TCP connection', [
                 'stage' => 'tcp_open',
                 'tls_enabled' => $tlsConfiguration->isEnabled(),
             ]);
 
-            $this->socket ??= $this->connector->connect($url, $context, $cancellation);
+            $this->socket = $this->connector->connect($url, $context, $cancellation);
 
             if ($tlsConfiguration->isEnabled()) {
+                $this->configureTlsStream($this->socket, $context);
                 $prefetchedMessages = $this->readPrefaceMessagesBeforeTlsHandshake($this->socket, $cancellation);
 
                 $this->logger?->debug('Starting TLS handshake', [
@@ -70,6 +72,17 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
                 $this->socket->setupTls($cancellation);
             }
         } catch (Throwable $exception) {
+            $failedSocket = $this->socket;
+            $this->socket = null;
+            try {
+                $failedSocket?->close();
+            } catch (Throwable $cleanupError) {
+                $this->logger?->error('Failed to close unsuccessful transport', [
+                    'stage' => 'connection_cleanup',
+                    ...ProtocolLogContext::exception($cleanupError),
+                ]);
+            }
+
             $error = $tlsConfiguration->isEnabled()
                 ? 'TLS handshake failed: ' . $exception->getMessage()
                 : $exception->getMessage();
@@ -227,10 +240,6 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
             $tlsContext = $tlsContext->withCaPath($tls->getCaPath());
         }
 
-        if ($tls->isAllowSelfSigned()) {
-            $tlsContext = $tlsContext->withSecurityLevel(0);
-        }
-
         if ($tls->getClientCertFile() !== null) {
             $tlsContext = $tlsContext->withCertificate(new Certificate(
                 $tls->getClientCertFile(),
@@ -257,6 +266,29 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
         }
 
         return $context->withTlsContext($tlsContext);
+    }
+
+    private function configureTlsStream(Socket $socket, ConnectContext $context): void
+    {
+        $allowSelfSigned = $this->configuration->getTlsConfiguration()->isAllowSelfSigned();
+        if (!$socket instanceof ResourceStream) {
+            if ($allowSelfSigned) {
+                throw new ConnectionException('allowSelfSigned requires a socket exposing a PHP stream resource');
+            }
+
+            return;
+        }
+
+        $resource = $socket->getResource();
+        if (!is_resource($resource) || get_resource_type($resource) !== 'stream') {
+            throw new ConnectionException('TLS configuration requires an open PHP stream resource');
+        }
+
+        // ClientTlsContext has no allow_self_signed API. ResourceSocket merges its
+        // options before crypto, preserving this additional PHP stream option.
+        $options                             = $context->getTlsContext()?->toStreamContextArray() ?? [];
+        $options['ssl']['allow_self_signed'] = $allowSelfSigned;
+        stream_context_set_options($resource, $options);
     }
 
     /**
