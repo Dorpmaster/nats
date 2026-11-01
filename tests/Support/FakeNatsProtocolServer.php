@@ -127,6 +127,27 @@ final class FakeNatsProtocolServer
         $session->ready    = true;
     }
 
+    /** @param array<string, mixed> $options */
+    public function sendInfo(int $sessionIndex, array $options = []): void
+    {
+        $payload = array_replace(json_decode(self::INFO_PAYLOAD, true, 512, JSON_THROW_ON_ERROR), $options);
+        $this->sessions[$sessionIndex]->socket->write('INFO ' . json_encode($payload, JSON_THROW_ON_ERROR) . "\r\n");
+    }
+
+    public function sendPing(int $sessionIndex): void
+    {
+        $this->sessions[$sessionIndex]->socket->write("PING\r\n");
+    }
+
+    public function awaitCommandNameCount(int $sessionIndex, string $name, int $count, float $timeoutSeconds = 1.0): void
+    {
+        $this->await(
+            fn(array $sessions): bool => count(array_filter($this->commandNames($sessionIndex), static fn(string $command): bool => $command === $name)) >= $count,
+            $timeoutSeconds,
+            sprintf('Expected %d %s commands on session %d', $count, $name, $sessionIndex),
+        );
+    }
+
     public function closeSession(int $sessionIndex): void
     {
         $session = $this->sessions[$sessionIndex] ?? null;
@@ -225,6 +246,9 @@ final class FakeNatsProtocolServer
 
                     if ($commandName === 'PING') {
                         $session->pingReceived = true;
+                        if ($session->ready) {
+                            $session->socket->write("PONG\r\n");
+                        }
 
                         continue;
                     }

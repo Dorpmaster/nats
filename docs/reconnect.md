@@ -111,8 +111,23 @@ This is the effective reconnect timeline observed by the current client:
    - send `CONNECT`
    - send `PING`
    - receive `PONG`
-9. `completeHandshake()` resumes write buffer, replays subscriptions if needed, and starts ping service.
+9. `completeHandshake()` replays subscriptions if needed, resumes the write buffer, and starts ping service.
 10. Only then is `connectionStatusChanged(CONNECTED)` dispatched.
 
 This is why `CONNECTED` event listeners can safely treat the client as
 post-ready rather than merely post-open.
+
+## INFO updates within an open transport
+
+The first INFO on each new transport starts exactly one CONNECT/PING handshake.
+Further INFO before the initial PONG or after READY updates server metadata and
+runs discovery without restarting the handshake. INFO without `connect_urls` keeps
+the existing discovered addresses. These updates do not replay subscriptions,
+re-emit CONNECTED or restart ping monitoring. A server PING still receives PONG;
+periodic client PING remains independent of the handshake PING.
+
+The handshake-attempt state belongs to Client and resets on every successful
+transport open, including a later `connect()` on the same Client. Failed CONNECT
+or handshake-PING sends use reconnect/close handling; they cannot suppress the
+handshake on the next connection. Replayed subscriptions still precede buffered
+application frames after the new transport reaches READY.

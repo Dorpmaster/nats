@@ -65,6 +65,7 @@ final class Client implements ClientInterface
     private DeferredCancellation|null $reconnectBackoffCancellation = null;
     private int $reconnectBackoffEpoch                              = 0;
     private int|null $activeReconnectBackoffEpoch                   = null;
+    private bool $handshakeStarted                                  = false;
     private bool $handshakeReady                                    = false;
     private bool $connectedEventPending                             = false;
     private bool $awaitingInitialPong                               = false;
@@ -300,6 +301,10 @@ final class Client implements ClientInterface
                     continue;
                 }
 
+                if ($response instanceof ConnectMessageInterface && $this->handshakeStarted) {
+                    continue;
+                }
+
                 if ($response !== null) {
                     try {
                         $this->logger?->debug('Queueing the response message', [
@@ -316,6 +321,14 @@ final class Client implements ClientInterface
                             ...ProtocolLogContext::exception($exception),
                             ...ProtocolLogContext::message($message),
                         ]);
+                        if ($response instanceof ConnectMessageInterface) {
+                            if (!$this->configuration->isReconnectEnabled()) {
+                                $this->connection->close();
+                            }
+                            if (!$this->tryReconnect($exception)) {
+                                return;
+                            }
+                        }
                     }
                 }
             }
@@ -870,6 +883,7 @@ final class Client implements ClientInterface
     private function applyConnectedTransitionEffects(ClientState $from): void
     {
         $this->inboundDispatchScheduler->reset();
+        $this->handshakeStarted      = false;
         $this->handshakeReady        = false;
         $this->connectedEventPending = true;
         $this->awaitingInitialPong   = false;
@@ -942,6 +956,11 @@ final class Client implements ClientInterface
     private function sendResponseMessage(NatsProtocolMessageInterface $message): void
     {
         if ($message instanceof ConnectMessageInterface) {
+            if ($this->handshakeStarted) {
+                return;
+            }
+
+            $this->handshakeStarted = true;
             $this->sendImmediate($message);
             $this->awaitingInitialPong = true;
             $this->sendImmediate(new PingMessage());

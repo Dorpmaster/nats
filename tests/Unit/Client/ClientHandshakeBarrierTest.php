@@ -359,6 +359,35 @@ final class ClientHandshakeBarrierTest extends TestCase
         });
     }
 
+    public function testRepeatedInfoUsesConnectionLifecycleWithBasicConnectionInterface(): void
+    {
+        $this->runAsyncTest(function (): void {
+            $reads      = 0;
+            $connection = new ScriptedConnection(onReceive: static function () use (&$reads) {
+                return match ($reads++) {
+                    0, 1, 4 => new InfoMessage(self::INFO_PAYLOAD),
+                    2, 5 => new PingMessage(),
+                    3 => new PongMessage(),
+                    default => throw new CancelledException(),
+                };
+            });
+            $client     = $this->createClient($connection);
+            try {
+                $client->connect();
+                $this->forceTick();
+                $this->forceTick();
+                self::assertSame([
+                    (string) new ConnectMessage($this->connectInfo()),
+                    (string) new PingMessage(),
+                    (string) new PongMessage(),
+                    (string) new PongMessage(),
+                ], $connection->sentWire());
+            } finally {
+                $client->disconnect();
+            }
+        });
+    }
+
     private function createClient(
         ConnectionInterface $connection,
         ClientConfiguration|null $configuration = null,

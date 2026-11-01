@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Process asynchronous INFO as server/topology updates without repeating CONNECT or handshake PING. Client owns handshake state per transport, preserving readiness, subscription replay order, ping monitoring and safe logs across updates and handshake-write failures.
+
 - Read JetStream delivery counts from validated classic or domain/account ACK subjects for MSG and HMSG, independently of opaque extension tokens including numeric tails. User `Nats-Num-Delivered` headers no longer influence automatic DROP_NEW termination; malformed or overflowing metadata yields an unknown count without interrupting message delivery.
 
 - Preserve ordinary HMSG headers containing `NATS/`, URLs and multiple colons, including repeated values in their original order. Recognize only the first, valid `NATS/1.0` preamble as protocol metadata while retaining separate statuses and received body sizes.

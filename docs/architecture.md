@@ -58,11 +58,30 @@ This library separates orchestration concerns from transport and buffering logic
 1. `connect()` moves `NEW|CLOSED -> CONNECTING`.
 2. `Connection::open()` establishes socket and parser feed.
 3. `Client` moves to `CONNECTED`, but outbound application writes stay paused until initial protocol readiness completes.
-4. After inbound `INFO`, client sends `CONNECT`, then `PING`, then waits for inbound `PONG` before resuming buffered application writes and starting regular ping health monitoring.
+4. After the first `INFO` on a new transport, client sends `CONNECT`, then `PING`, then waits for inbound `PONG` before resuming buffered application writes and starting regular ping health monitoring.
 5. Inbound `MSG/HMSG` handlers are scheduled asynchronously after parsing, subject to bounded concurrency and bounded pending queue limits.
 6. On transport/parser failure, `Client` enters `RECONNECTING` and runs failover/backoff.
 7. On reconnect success, the same readiness barrier is applied again; restored subscriptions are replayed before buffered application frames are flushed.
 8. `drain()` enters `DRAINING`, stops accepting new application inbound callbacks, waits bounded time for active + pending dispatch drain, then flushes and unsubscribes before closing to `CLOSED`.
+
+## Asynchronous INFO and the transport handshake
+
+`Client` owns the handshake attempt for each successfully opened transport. It
+marks the attempt before writing CONNECT, so another INFO cannot initiate a
+second CONNECT/PING while the first handshake is waiting for PONG. Every INFO
+still reaches the dispatcher to update supported server metadata and the existing
+`connect_urls` discovery path. Missing URLs do not clear the server pool.
+
+The dispatcher interface remains unchanged: third-party dispatchers may return a
+CONNECT proposal for every INFO; Client sends only the first proposal per transport.
+Later INFO neither replays subscriptions nor resumes/reorders the queue, restarts
+ping monitoring or repeats CONNECTED. Server PING/PONG and periodic client PING
+continue independently. Only the initial handshake PONG makes the transport READY.
+
+A new transport after reconnect or explicit disconnect/connect resets this state.
+CONNECT or handshake-PING write failure enters the normal reconnect/close path;
+the next transport gets a fresh handshake attempt. Diagnostics retain only safe
+scalar metadata, without CONNECT objects or credentials.
 
 ## Transition Orchestration
 
