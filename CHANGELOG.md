@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.0] - Unreleased
+
+### Added
+
+- Add optional JetStream server capability contracts based on current-transport INFO `api_lvl`, configurable API prefixes, server `err_code` access, nullable atomic/batched publishing and consumer-limit stream options, and selected-field stream UPDATE with exact JSON configuration preservation and one operation deadline. Existing interfaces, constructors and dependency floors remain compatible.
+
+### Fixed
+
+- Stream UPDATE requests use a cancellable single-attempt queue lifetime: uncertain writes are never replayed after reconnect, and expired or cancelled unsent frames are withdrawn. Ordinary publication replay is unchanged.
+
 ## [1.2.1] - Unreleased
 
 ### Changed

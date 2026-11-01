@@ -32,6 +32,25 @@ final class InfoMessageTest extends TestCase
         }
     }
 
+    public static function apiLevels(): iterable
+    {
+        foreach ([null, 0, 3, 4, 99, -1, '4', 4.5, [], true] as $index => $level) {
+            yield 'level-' . $index => [$level];
+        }
+    }
+
+    #[DataProvider('apiLevels')]
+    public function testApiLevelIsOptionalAndIndependentOfCoreProto(mixed $level): void
+    {
+        $options = ['server_id' => 'synthetic', 'server_name' => 'nats', 'version' => '99.0.0', 'proto' => 99, 'go' => 'go', 'host' => 'localhost', 'port' => 4222, 'headers' => true, 'max_payload' => 1024];
+        if ($level !== null) {
+            $options['api_lvl'] = $level;
+        }
+        $info = (new InfoMessage(json_encode($options, JSON_THROW_ON_ERROR)))->getServerInfo();
+        self::assertSame(99, $info->proto);
+        self::assertSame(is_int($level) && $level >= 0 ? $level : null, $info->api_lvl);
+    }
+
     public static function dataProvider(): array
     {
         return [

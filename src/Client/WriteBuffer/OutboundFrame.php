@@ -13,6 +13,7 @@ final readonly class OutboundFrame implements NatsProtocolMessageInterface
         public NatsProtocolMessageInterface $message,
         public string $data,
         public int $bytes,
+        public RequestLifetime|null $request = null,
     ) {
     }
 

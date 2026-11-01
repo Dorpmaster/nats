@@ -69,7 +69,8 @@ or missing reconnect lifecycle internals.
 - with `bufferWhileReconnecting=true`, frames are queued in outbound write buffer (bounded by configured limits).
 - after reconnect `open()`, application frames still wait behind the initial protocol barrier: `INFO -> CONNECT -> PING/PONG -> READY`.
 - existing subscriptions are replayed immediately after reconnect readiness and before buffered application publishes are flushed.
-- `request()` is not silently retried.
+- `request()` has no application-level retry loop, but its ordinary queued frames still use the existing write-buffer replay policy.
+- Optional `requestOnce()` never replays an attempted write and withdraws unsent request/inbox frames on completion, cancellation or timeout. JetStream UPDATE uses this contract; reconnect itself remains enabled.
 - request setup (`SUB` reply inbox + request `PUB/HPUB`) follows the same buffering rules and will not hit the socket before readiness.
 
 ## Inbound Dispatch During Reconnect

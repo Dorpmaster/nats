@@ -7,8 +7,9 @@ namespace Dorpmaster\Nats\Domain\JetStream\Pull;
 use Amp\DeferredFuture;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamTimeoutException;
-use Dorpmaster\Nats\Domain\JetStream\Internal\ResourceName;
 use Dorpmaster\Nats\Domain\JetStream\Internal\AckSubjectMetadata;
+use Dorpmaster\Nats\Domain\JetStream\Internal\ApiError;
+use Dorpmaster\Nats\Domain\JetStream\Internal\ResourceName;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamClientAcknowledger;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessage;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAcker;
@@ -26,6 +27,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Revolt\EventLoop;
 use Throwable;
+use stdClass;
 
 final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
 {
@@ -294,19 +296,15 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
     private function jsonError(string $payload): JetStreamApiException|null
     {
         try {
-            $decoded = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($payload, false, 512, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
         } catch (JsonException) {
             return null;
         }
 
-        if (!is_array($decoded) || !isset($decoded['error']) || !is_array($decoded['error'])) {
+        if (!$decoded instanceof stdClass || !isset($decoded->error) || (!is_array($decoded->error) && !$decoded->error instanceof stdClass)) {
             return null;
         }
-
-        return new JetStreamApiException(
-            (int) ($decoded['error']['code'] ?? 500),
-            (string) ($decoded['error']['description'] ?? 'JetStream pull fetch error'),
-        );
+        return ApiError::fromResponse($decoded, 500, 'JetStream pull fetch error');
     }
 
     /** @param array<string, string> $headers */

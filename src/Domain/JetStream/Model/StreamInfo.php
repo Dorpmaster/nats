@@ -12,7 +12,13 @@ final readonly class StreamInfo
     public function __construct(
         private string $name,
         private array $subjects,
+        private JsonObject|null $configuration = null,
     ) {
+    }
+
+    public function getConfiguration(): JsonObject|null
+    {
+        return $this->configuration;
     }
 
     public function getName(): string

@@ -253,6 +253,57 @@ final class ClientAsyncInfoConformanceTest extends TestCase
         });
     }
 
+    public function testServerCapabilitiesFollowInfoRevisionAndTransportLifetime(): void
+    {
+        $this->setTimeout(15);
+        $this->runAsyncTest(function (): void {
+            $server   = new FakeNatsProtocolServer();
+            $states   = [];
+            [$client] = $this->client($server, $states, configuration: $this->reconnectConfiguration());
+            $feature  = \Dorpmaster\Nats\Domain\JetStream\Capability\Feature::ATOMIC_EOB;
+            try {
+                $client->connect();
+                $server->awaitCommandCount(0, 2);
+                $initial = $client->getServerInformation();
+                self::assertTrue($initial->isCurrentConnection());
+                self::assertNull($initial->apiLevel);
+                $server->sendInfo(0, ['api_lvl' => 4, 'jetstream' => true, 'version' => '99.0.0', 'proto' => 1]);
+                $server->sendPing(0);
+                $server->awaitCommandNameCount(0, 'PONG', 1);
+                $capabilities = (new \Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport($client))->getCapabilities();
+                self::assertSame(\Dorpmaster\Nats\Domain\JetStream\Capability\Support::SUPPORTED, $capabilities->check($feature)->support);
+                self::assertSame('99.0.0', $capabilities->server->version);
+                self::assertFalse($initial->isCurrentConnection());
+                $server->releasePong(0);
+                $this->requestBarrier($client, $server, 0);
+                $server->sendInfo(0, ['version' => '99.1.0', 'proto' => 99]);
+                $this->requestBarrier($client, $server, 0);
+                self::assertNull($client->getServerInformation()->apiLevel);
+                self::assertSame(\Dorpmaster\Nats\Domain\JetStream\Capability\Support::UNKNOWN, $capabilities->check($feature)->support);
+                $server->sendInfo(0, ['api_lvl' => 4]);
+                $this->requestBarrier($client, $server, 0);
+                $capabilities = (new \Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport($client))->getCapabilities();
+                self::assertSame(\Dorpmaster\Nats\Domain\JetStream\Capability\Support::SUPPORTED, $capabilities->check($feature)->support);
+                $server->closeSession(0);
+                $server->awaitSessionCount(2);
+                $server->awaitCommandCount(1, 2);
+                self::assertSame(\Dorpmaster\Nats\Domain\JetStream\Capability\Support::UNKNOWN, $capabilities->check($feature)->support);
+                self::assertNull($client->getServerInformation()->apiLevel);
+                self::assertNotSame($capabilities->server->connectionId, $client->getServerInformation()->connectionId);
+                $server->sendInfo(1, ['api_lvl' => 3, 'version' => '2.12.6']);
+                $server->releasePong(1);
+                $this->requestBarrier($client, $server, 1);
+                $new = (new \Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport($client))->getCapabilities();
+                self::assertSame(\Dorpmaster\Nats\Domain\JetStream\Capability\Support::UNSUPPORTED, $new->check($feature)->support);
+                $client->disconnect();
+                self::assertFalse($new->server->isCurrentConnection());
+            } finally {
+                $client->disconnect();
+                $server->stop();
+            }
+        });
+    }
+
     private function reconnectConfiguration(): ClientConfiguration
     {
         return new ClientConfiguration(reconnectEnabled: true, maxReconnectAttempts: 5, reconnectBackoffInitialMs: 1, reconnectBackoffMaxMs: 1, reconnectJitterFraction: 0.0, bufferWhileReconnecting: true);

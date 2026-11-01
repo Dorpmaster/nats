@@ -51,6 +51,7 @@ final readonly class InfoMessage implements NatsProtocolMessageInterface, InfoMe
             nonce: $options['nonce'] ?? null,
             cluster: $options['cluster'] ?? null,
             domain: $options['domain'] ?? null,
+            api_lvl: isset($options['api_lvl']) && is_int($options['api_lvl']) && $options['api_lvl'] >= 0 ? $options['api_lvl'] : null,
         );
     }
 

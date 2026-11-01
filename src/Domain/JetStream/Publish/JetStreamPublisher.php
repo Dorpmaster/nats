@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Domain\JetStream\Publish;
 
 use Amp\CancelledException;
-use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
+use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
+use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilities;
+use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilitiesProviderInterface;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamTimeoutException;
+use Dorpmaster\Nats\Domain\JetStream\Internal\ApiError;
+use Dorpmaster\Nats\Domain\JetStream\Model\JsonObject;
 use Dorpmaster\Nats\Domain\JetStream\Model\PubAck;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
@@ -22,7 +26,7 @@ use Throwable;
 
 use function Amp\delay;
 
-final readonly class JetStreamPublisher implements JetStreamPublisherInterface
+final readonly class JetStreamPublisher implements JetStreamPublisherInterface, JetStreamCapabilitiesProviderInterface
 {
     private const int DEFAULT_TIMEOUT_MS = 2000;
 
@@ -30,6 +34,11 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
         private ClientInterface $client,
         private LoggerInterface|null $logger = null,
     ) {
+    }
+
+    public function getCapabilities(): JetStreamCapabilities
+    {
+        return JetStreamCapabilities::forClient($this->client);
     }
 
     public function publish(
@@ -88,7 +97,7 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
             } catch (Throwable $exception) {
                 $this->getLogger()->warning('js.publish.error', [
                     'code' => 500,
-                    'description' => $exception->getMessage(),
+                    'error_type' => $exception::class,
                 ]);
                 throw new JetStreamApiException(500, $exception->getMessage(), $exception);
             }
@@ -99,32 +108,32 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
         }
 
         $payloadResponse = $response->getPayload();
+        if (!is_string($payloadResponse)) {
+            throw new JetStreamApiException(500, 'JetStream PubAck response payload must be a string');
+        }
 
         try {
-            $decoded = json_decode($payloadResponse, true, 512, JSON_THROW_ON_ERROR);
+            $object  = new JsonObject($payloadResponse);
+            $decoded = $object->toArray();
         } catch (JsonException $exception) {
             throw new JetStreamApiException(500, 'Failed to decode JetStream PubAck JSON', $exception);
         }
 
-        if (!is_array($decoded)) {
-            throw new JetStreamApiException(500, 'JetStream PubAck response must be a JSON object');
-        }
-
-        if (isset($decoded['error']) && is_array($decoded['error'])) {
-            $code        = (int) ($decoded['error']['code'] ?? 500);
-            $description = (string) ($decoded['error']['description'] ?? 'JetStream publish error');
+        $error = ApiError::fromResponse(json_decode($object->toJson(), false, 512, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING), 500, 'JetStream publish error');
+        if ($error !== null) {
             $this->getLogger()->warning('js.publish.error', [
-                'code' => $code,
-                'description' => $description,
+                'operation' => 'publish',
+                'code' => $error->getApiCode(),
+                'err_code' => $error->getErrorCode(),
+                'error_type' => $error::class,
             ]);
-
-            throw new JetStreamApiException($code, $description);
+            throw $error;
         }
 
         try {
             $ack = PubAck::fromArray($decoded);
             $this->getLogger()->debug('js.publish.ack', [
-                'stream' => $ack->getStream(),
+                'operation' => 'publish',
                 'seq' => $ack->getSeq(),
                 'duplicate' => $ack->isDuplicate(),
             ]);
@@ -133,7 +142,7 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface
         } catch (Throwable $exception) {
             $this->getLogger()->warning('js.publish.error', [
                 'code' => 500,
-                'description' => $exception->getMessage(),
+                'error_type' => $exception::class,
             ]);
             throw new JetStreamApiException(500, $exception->getMessage(), $exception);
         }

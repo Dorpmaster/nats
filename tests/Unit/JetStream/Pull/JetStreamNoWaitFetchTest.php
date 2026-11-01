@@ -340,6 +340,46 @@ final class JetStreamNoWaitFetchTest extends TestCase
         });
     }
 
+    public function testJsonServiceErrorRetainsDistinctApiAndServerCodes(): void
+    {
+        $this->runAsyncTest(function (): void {
+            $consumer = $this->consumer(static function (\Closure $handler): void {
+                EventLoop::queue(static fn () => $handler(new MsgMessage('reply', '1', '{"error":{"code":409,"err_code":123456,"description":"synthetic-n1-pull-secret"}}')));
+            });
+            try {
+                $consumer->fetch(1, 100, true);
+                self::fail('Expected JSON service error');
+            } catch (JetStreamApiException $error) {
+                self::assertSame(409, $error->getApiCode());
+                self::assertSame(123456, $error->getErrorCode());
+                self::assertSame('synthetic-n1-pull-secret', $error->getDescription());
+            }
+        });
+    }
+
+    public function testMalformedJsonServiceErrorCannotCauseTypeErrorOrSuccess(): void
+    {
+        $this->runAsyncTest(function (): void {
+            $consumer = $this->consumer(static function (\Closure $handler): void {
+                EventLoop::queue(static fn () => $handler(new MsgMessage('reply', '1', '{"error":{"code":[],"description":{}}}')));
+            });
+            self::expectException(JetStreamApiException::class);
+            $consumer->fetch(1, 100, true);
+        });
+    }
+
+    public function testUserPayloadErrorFieldWithAckRemainsUnchanged(): void
+    {
+        $this->runAsyncTest(function (): void {
+            $payload  = '{"error":{"code":409,"err_code":123456,"description":"user data"}}';
+            $consumer = $this->consumer(static function (\Closure $handler) use ($payload): void {
+                EventLoop::queue(static fn () => $handler(self::data($payload)));
+            });
+            $messages = iterator_to_array($consumer->fetch(1, 100, true)->messages());
+            self::assertSame($payload, $messages[0]->getPayload());
+        });
+    }
+
     private function consumer(\Closure $publish, \Closure|null $cleanup = null, int $subscriptions = 1): JetStreamPullConsumer
     {
         $handlers = [];

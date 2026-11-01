@@ -394,3 +394,7 @@ integration-jetstream-cluster-tls: build
 .PHONY: integration-tls-self-signed
 integration-tls-self-signed: build
 	python3 tests/Support/tls/run-self-signed.py
+
+.PHONY: integration-jetstream-compatibility
+integration-jetstream-compatibility: build
+	python3 tests/Support/run-jetstream-compatibility.py

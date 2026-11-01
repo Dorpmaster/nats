@@ -8,7 +8,7 @@ Outbound sending is implemented by `WriteBufferService`.
 - enforce message/byte limits
 - apply overflow policy (`ERROR`, `DROP_NEW`)
 - run writer loop for active connection
-- keep failed frame for first-send after reconnect
+- keep ordinary failed frames for first-send after reconnect
 - support deterministic `drain()`
 
 ## Lifecycle
@@ -41,7 +41,7 @@ frame and its accounting retain their original bytes.
 
 - when connection changes, writer loop is re-bound to new connection;
 - client uses `pause()/resume()` to hold application frames until the NATS handshake is ready;
-- failed frame is retried first;
+- ordinary failed frames are retried first;
 - pending counters are not double-counted during failed write replay.
 
 ## Diagnostics
@@ -52,3 +52,22 @@ The service exposes runtime diagnostics:
 - `getPendingMessages()`
 - `getPendingBytes()`
 - `hasFailedFrame()`
+
+## Single-attempt request frames
+
+`SingleAttemptWriteBufferInterface` is an optional guarantee; the original
+`WriteBufferInterface` is unchanged. A marked `OutboundFrame::request` shares its
+`RequestLifetime` with the caller. The writer checks cancellation immediately
+before starting a send and atomically consumes its one attempt. If the send
+throws, the marked frame is released and its caller receives `RequestWriteException`
+with the original cause, before reconnect handling runs. It is never saved as
+`failedFrame` after an attempted send. An unattempted frame temporarily held as
+`failedFrame` because the connection was closed can still be withdrawn on expiry.
+
+The internal FIFO supports physical removal, so expired paused frames release
+both byte/message accounting and queue capacity without waiting for resume.
+Repeated completion/removal is idempotent. An active write remains accounted
+until it settles; cancellation cannot recall bytes already handed to the transport.
+Ordinary frames keep their existing snapshot, FIFO order, overflow policy and
+failed-frame retry behavior. Writer lifecycle generations prevent a cancelled old
+loop from suppressing the writer for a newly attached connection.

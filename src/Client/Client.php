@@ -5,22 +5,29 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Client;
 
 use Amp\Cancellation;
+use Dorpmaster\Nats\Client\WriteBuffer\RequestLifetime;
+use Dorpmaster\Nats\Domain\Client\SingleAttemptRequestClientInterface;
+use Dorpmaster\Nats\Domain\Client\SingleAttemptWriteBufferInterface;
 use Amp\CancelledException;
 use Amp\CompositeCancellation;
 use Amp\DeferredCancellation;
 use Amp\DeferredFuture;
 use Amp\TimeoutCancellation;
 use Closure;
+use Dorpmaster\Nats\Client\Cluster\InfoConnectUrlsExtractor;
+use Dorpmaster\Nats\Connection\ServerPoolService;
 use Dorpmaster\Nats\Domain\Client\ClientConfigurationInterface;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
-use Dorpmaster\Nats\Domain\Client\InboundDispatchOverflowException;
 use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
 use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\Client\DelayStrategyInterface;
+use Dorpmaster\Nats\Domain\Client\InboundDispatchOverflowException;
 use Dorpmaster\Nats\Domain\Client\MessageDispatcherInterface;
 use Dorpmaster\Nats\Domain\Client\PingServiceInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectBackoffServiceInterface;
 use Dorpmaster\Nats\Domain\Client\ReconnectDelayHelperInterface;
+use Dorpmaster\Nats\Domain\Client\ServerInformation;
+use Dorpmaster\Nats\Domain\Client\ServerInformationProviderInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionStorageInterface;
 use Dorpmaster\Nats\Domain\Client\WriteBufferInterface;
@@ -32,8 +39,6 @@ use Dorpmaster\Nats\Domain\Connection\ServerPoolInterface;
 use Dorpmaster\Nats\Domain\Connection\ServerSelectableConnectionInterface;
 use Dorpmaster\Nats\Domain\Event\EventDispatcherInterface;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
-use Dorpmaster\Nats\Connection\ServerPoolService;
-use Dorpmaster\Nats\Client\Cluster\InfoConnectUrlsExtractor;
 use Dorpmaster\Nats\Protocol\Contracts\ConnectMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
@@ -42,21 +47,22 @@ use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
 use Dorpmaster\Nats\Protocol\HPubMessage;
+use Dorpmaster\Nats\Protocol\Metadata\ServerInfo;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
 use Dorpmaster\Nats\Protocol\OutboundFrameBuilder;
 use Dorpmaster\Nats\Protocol\PingMessage;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Protocol\SubMessage;
 use Dorpmaster\Nats\Protocol\UnSubMessage;
-use LogicException;
 use Dorpmaster\Nats\Telemetry\ProtocolLogContext;
+use LogicException;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Throwable;
 
 use function Amp\delay;
 
-final class Client implements ClientInterface
+final class Client implements ClientInterface, ServerInformationProviderInterface, SingleAttemptRequestClientInterface
 {
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
 
@@ -65,6 +71,9 @@ final class Client implements ClientInterface
     private DeferredCancellation|null $reconnectBackoffCancellation = null;
     private int $reconnectBackoffEpoch                              = 0;
     private int|null $activeReconnectBackoffEpoch                   = null;
+    private ServerInfo|null $serverInformation                      = null;
+    private int $connectionGeneration                               = 0;
+    private int $serverInformationRevision                          = 0;
     private bool $handshakeStarted                                  = false;
     private bool $handshakeReady                                    = false;
     private bool $connectedEventPending                             = false;
@@ -248,6 +257,8 @@ final class Client implements ClientInterface
                 }
 
                 if ($message instanceof InfoMessageInterface) {
+                    $this->serverInformation = $message->getServerInfo();
+                    $this->serverInformationRevision++;
                     $this->discoverServersFromInfo($message);
                 }
 
@@ -415,6 +426,11 @@ final class Client implements ClientInterface
      */
     public function subscribe(string $subject, Closure $closure, string|null $queueGroup = null): string
     {
+        return $this->subscribeInternal($subject, $closure, $queueGroup);
+    }
+
+    private function subscribeInternal(string $subject, Closure $closure, string|null $queueGroup = null, RequestLifetime|null $request = null): string
+    {
         $sid     = $this->subscriptionIdHelper->generateId();
         $message = new SubMessage($subject, $sid, $queueGroup);
         $this->logger?->debug('Subscribing', [
@@ -434,7 +450,7 @@ final class Client implements ClientInterface
             $this->logger?->debug('Sending "SUB" message', [
                 ...ProtocolLogContext::message($message),
             ]);
-            $this->enqueueOutbound($message);
+            $this->enqueueOutbound($message, request: $request);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception was thrown while subscribing', [
                 ...ProtocolLogContext::exception($exception),
@@ -498,10 +514,21 @@ final class Client implements ClientInterface
         $this->enqueueOutbound($message);
     }
 
-    public function request(
-        PubMessageInterface|HPubMessageInterface $message,
-        float $timeout = 30
-    ): MsgMessageInterface|HMsgMessageInterface {
+    public function request(PubMessageInterface|HPubMessageInterface $message, float $timeout = 30): MsgMessageInterface|HMsgMessageInterface
+    {
+        return $this->performRequest($message, $timeout, false);
+    }
+
+    public function requestOnce(PubMessageInterface|HPubMessageInterface $message, float $timeout = 30): MsgMessageInterface|HMsgMessageInterface
+    {
+        if (!$this->writeBuffer instanceof SingleAttemptWriteBufferInterface) {
+            throw new ConnectionException('Single-attempt requests require a write buffer implementing SingleAttemptWriteBufferInterface');
+        }
+        return $this->performRequest($message, $timeout, true);
+    }
+
+    private function performRequest(PubMessageInterface|HPubMessageInterface $message, float $timeout, bool $once): MsgMessageInterface|HMsgMessageInterface
+    {
         if (in_array($this->status, [ClientState::DRAINING, ClientState::CLOSED], true)) {
             throw new ConnectionException(sprintf('Could not request while client state is %s', $this->status->value));
         }
@@ -528,17 +555,37 @@ final class Client implements ClientInterface
             new TimeoutCancellation($timeout),
         );
 
+        $deferred        = new DeferredFuture();
+        $fail            = static function (Throwable $error) use ($deferred): void {
+            if (!$deferred->isComplete()) {
+                $deferred->error($error);
+            }
+        };
+        $requestLifetime = $once ? new RequestLifetime($fail, $cancellation) : null;
+        $inboxLifetime   = $once ? new RequestLifetime($fail, $cancellation) : null;
         try {
-            $deferred = new DeferredFuture();
-
-            $cid = $cancellation->subscribe(static fn(CancelledException $exception) => $deferred->error($exception));
-            $sid = $this->subscribe($receiver, static function (MsgMessageInterface|HMsgMessageInterface $message) use ($deferred): null {
-                $deferred->complete($message);
-
-                return null;
+            $cancellation->throwIfRequested();
+            $cid     = $cancellation->subscribe(static function (CancelledException $exception) use ($fail, $requestLifetime, $inboxLifetime): void {
+                $requestLifetime?->finish();
+                $inboxLifetime?->finish();
+                $fail($exception);
             });
-
-            $this->publish($requestMessage);
+            $handler = static function (MsgMessageInterface|HMsgMessageInterface $message) use ($deferred, $requestLifetime, $inboxLifetime): null {
+                if (!$deferred->isComplete()) {
+                    $requestLifetime?->finish();
+                    $inboxLifetime?->finish();
+                    $deferred->complete($message);
+                }
+                return null;
+            };
+            $sid     = $once
+                ? $this->subscribeInternal($receiver, $handler, request: $inboxLifetime)
+                : $this->subscribe($receiver, $handler);
+            if ($once) {
+                $this->enqueueOutbound($requestMessage, request: $requestLifetime);
+            } else {
+                $this->publish($requestMessage);
+            }
 
             return $deferred->getFuture()->await();
         } catch (Throwable $exception) {
@@ -548,6 +595,8 @@ final class Client implements ClientInterface
 
             throw $exception;
         } finally {
+            $requestLifetime?->finish();
+            $inboxLifetime?->finish();
             if (isset($sid) === true) {
                 try {
                     $this->unsubscribe($sid);
@@ -860,6 +909,7 @@ final class Client implements ClientInterface
     private function applyTransitionEffects(ClientState $from, ClientState $to): void
     {
         if ($to !== ClientState::CONNECTED) {
+            $this->serverInformation     = null;
             $this->connectedEventPending = false;
         }
 
@@ -882,6 +932,8 @@ final class Client implements ClientInterface
 
     private function applyConnectedTransitionEffects(ClientState $from): void
     {
+        $this->connectionGeneration++;
+        $this->serverInformation = null;
         $this->inboundDispatchScheduler->reset();
         $this->handshakeStarted      = false;
         $this->handshakeReady        = false;
@@ -946,11 +998,11 @@ final class Client implements ClientInterface
         $this->activeReconnectBackoffEpoch  = null;
     }
 
-    private function enqueueOutbound(NatsProtocolMessageInterface $message, bool $allowBufferWhileReconnecting = false): void
+    private function enqueueOutbound(NatsProtocolMessageInterface $message, bool $allowBufferWhileReconnecting = false, RequestLifetime|null $request = null): void
     {
         $state = $this->assertCanEnqueueOutbound($allowBufferWhileReconnecting);
 
-        $this->enqueueFrame($message, $state);
+        $this->enqueueFrame($message, $state, $request);
     }
 
     private function sendResponseMessage(NatsProtocolMessageInterface $message): void
@@ -1036,6 +1088,26 @@ final class Client implements ClientInterface
                 $subscription['queueGroup'],
             ));
         }
+    }
+
+    public function getServerInformation(): ServerInformation
+    {
+        $info       = $this->serverInformation;
+        $generation = $this->connectionGeneration;
+        $revision   = $this->serverInformationRevision;
+        return new ServerInformation(
+            serverId: $info?->server_id,
+            version: $info?->version,
+            jetStream: $info?->jetstream,
+            apiLevel: $info?->api_lvl,
+            connectionId: $info === null ? null : $generation,
+            isCurrent: fn (): bool => $info !== null
+                && $this->serverInformation !== null
+                && $this->status === ClientState::CONNECTED
+                && !$this->connection->isClosed()
+                && $this->connectionGeneration === $generation
+                && $this->serverInformationRevision === $revision,
+        );
     }
 
     public function getState(): ClientState
@@ -1134,12 +1206,14 @@ final class Client implements ClientInterface
         return $state;
     }
 
-    private function enqueueFrame(NatsProtocolMessageInterface $message, ClientState $state): void
+    private function enqueueFrame(NatsProtocolMessageInterface $message, ClientState $state, RequestLifetime|null $request = null): void
     {
-        $frame = $this->outboundFrameBuilder->build($message);
+        $frame = $this->outboundFrameBuilder->build($message, $request);
 
         try {
-            $this->writeBuffer->enqueue($frame);
+            if (!$this->writeBuffer->enqueue($frame) && $request !== null) {
+                throw new WriteBufferOverflowException('Single-attempt request frame was dropped by the write buffer');
+            }
         } catch (WriteBufferOverflowException $exception) {
             $this->logger?->warning('Outbound write buffer overflow', [
                 'state' => $state->value,

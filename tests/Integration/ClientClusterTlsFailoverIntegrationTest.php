@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Tests\Integration;
 
 use Amp\DeferredFuture;
+use Amp\CancelledException;
 use Amp\SignalCancellation;
 use Amp\Socket\DnsSocketConnector;
 use Amp\Socket\RetrySocketConnector;
@@ -16,6 +17,7 @@ use Dorpmaster\Nats\Client\SubscriptionStorage;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
 use Dorpmaster\Nats\Domain\Client\ClientState;
+use Dorpmaster\Nats\Domain\Client\ClientNotConnectedException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
 use Dorpmaster\Nats\Domain\Connection\ServerAddress;
 use Dorpmaster\Nats\Domain\Connection\TlsConfiguration;
@@ -88,7 +90,10 @@ final class ClientClusterTlsFailoverIntegrationTest extends TestCase
                 $subscriber->connect();
                 $publisher->connect();
                 self::assertSame('n1', $subscriber->getCurrentServer()?->getHost());
-                $subscriber->subscribe($subject, static function (NatsProtocolMessageInterface $message) use ($received): null {
+                $subscriber->subscribe($subject, static function (NatsProtocolMessageInterface $message) use ($received): PubMessage|null {
+                    if ($message->getPayload() === 'readiness-probe') {
+                        return new PubMessage((string) $message->getReplyTo(), 'ready');
+                    }
                     if (!$received->isComplete()) {
                         $received->complete($message->getPayload());
                     }
@@ -96,9 +101,12 @@ final class ClientClusterTlsFailoverIntegrationTest extends TestCase
                     return null;
                 });
 
+                $this->awaitSubscriptionRoute($publisher, $subject);
+
                 // Act
                 NatsClusterHarness::stopNode($stoppedHost);
                 $this->awaitFailover($subscriber, $stoppedHost, 12.0);
+                $this->awaitSubscriptionRoute($publisher, $subject);
                 $this->publishWithRetry($publisher, new PubMessage($subject, 'after-failover'), 6.0);
                 $payload = $received->getFuture()->await(new TimeoutCancellation(3));
 
@@ -244,6 +252,24 @@ final class ClientClusterTlsFailoverIntegrationTest extends TestCase
             clientCertFile: self::clientCertFile(),
             clientKeyFile: self::clientKeyFile(),
         );
+    }
+
+    private function awaitSubscriptionRoute(Client $publisher, string $subject): void
+    {
+        // CONNECTED precedes PONG/replay. A request/reply proves restored interest
+        // is usable across nodes, rather than assuming readiness from that state.
+        $deadline = hrtime(true) + 6_000_000_000;
+        while (hrtime(true) < $deadline) {
+            try {
+                $reply = $publisher->request(new PubMessage($subject, 'readiness-probe'), min(0.3, max(0.001, ($deadline - hrtime(true)) / 1_000_000_000)));
+                self::assertSame('ready', $reply->getPayload());
+                return;
+            } catch (CancelledException | ClientNotConnectedException | ConnectionException) {
+                // Retry only the idempotent readiness probe within one bounded deadline.
+            }
+            delay(0.01);
+        }
+        self::fail('Restored TLS subscription did not complete the readiness exchange');
     }
 
     private function publishWithRetry(Client $publisher, PubMessage $message, float $timeoutSeconds): void

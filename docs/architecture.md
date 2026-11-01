@@ -170,3 +170,24 @@ The same policy applies after reconnect and to callback/write-buffer failures.
 DEBUG remains available with the worker's Monolog, `PsrLogMessageProcessor`, and
 AMPHP `ConsoleFormatter` setup. Credential transmission and protocol frames are
 unchanged. Application code still receives the original exceptions and causes.
+
+## JetStream server information
+
+Client exposes selected INFO facts through the optional
+`ServerInformationProviderInterface` without changing `ClientInterface` or the
+dispatcher contract. INFO revision and transport generation invalidate cached
+snapshots on an update or lifecycle change. JetStream capabilities are advisory,
+per-feature protocol rules; they do not probe/mutate resources or infer account
+permissions. Domain/import API targets remain unknown from local INFO alone.
+See [JetStream compatibility](jetstream-compatibility.md).
+
+## Mutation requests and replay
+
+Client owns the request future, inbox and timeout; `RequestLifetime` connects that
+owner to cancellable queue snapshots. Transport selects single-attempt semantics
+for JetStream UPDATE. WriteBuffer owns physical FIFO removal and accounting and
+never puts an attempted single-attempt frame into `failedFrame`. A write failure
+completes the request with its original cause before invoking normal reconnect
+handling. Legacy publication frames retain their replay semantics. The old public
+interfaces remain usable; unsupported optional single-attempt capabilities fail
+explicitly instead of silently downgrading mutation safety.
