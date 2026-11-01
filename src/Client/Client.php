@@ -49,6 +49,7 @@ use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Protocol\SubMessage;
 use Dorpmaster\Nats\Protocol\UnSubMessage;
 use LogicException;
+use Dorpmaster\Nats\Telemetry\ProtocolLogContext;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Throwable;
@@ -141,7 +142,7 @@ final class Client implements ClientInterface
 
     public function connect(): void
     {
-        $this->logger?->debug('Opening a new connection');
+        $this->logger?->debug('Opening a new connection', ['stage' => 'connect', 'state' => $this->status->value]);
 
         try {
             $status = match ($this->status) {
@@ -158,8 +159,10 @@ final class Client implements ClientInterface
                 default => null,
             };
         } catch (CancelledException $exception) {
-            $this->logger?->error($exception->getMessage(), [
-                'exception' => $exception,
+            $this->logger?->error('Connection operation failed', [
+                'stage' => 'connection',
+                'state' => $this->status->value,
+                ...ProtocolLogContext::exception($exception),
             ]);
 
             throw $exception;
@@ -193,8 +196,10 @@ final class Client implements ClientInterface
         } catch (ConnectionException $exception) {
             $this->moveToState(ClientState::CLOSED, 'open() failed');
 
-            $this->logger?->error($exception->getMessage(), [
-                'exception' => $exception,
+            $this->logger?->error('Connection operation failed', [
+                'stage' => 'connection',
+                'state' => $this->status->value,
+                ...ProtocolLogContext::exception($exception),
             ]);
 
             throw $exception;
@@ -247,7 +252,9 @@ final class Client implements ClientInterface
 
                 try {
                     $this->logger?->debug('Dispatching the message', [
-                        'message' => $message,
+                        'stage' => 'dispatch',
+                        'state' => $this->status->value,
+                        ...ProtocolLogContext::message($message),
                     ]);
 
                     if (in_array($message->getType(), [NatsMessageType::MSG, NatsMessageType::HMSG], true)) {
@@ -264,7 +271,9 @@ final class Client implements ClientInterface
                             assert($response instanceof NatsProtocolMessageInterface);
 
                             $this->logger?->debug('Queueing the response message', [
-                                'message' => $response,
+                                ...ProtocolLogContext::message($response),
+                                'stage' => $response instanceof ConnectMessageInterface ? 'handshake' : 'response',
+                                'state' => $this->status->value,
                             ]);
 
                             $this->enqueueInboundDispatchResponse($response);
@@ -282,8 +291,10 @@ final class Client implements ClientInterface
                     continue;
                 } catch (Throwable $exception) {
                     $this->logger?->error('An exception was thrown during dispatching the message', [
-                        'exception' => $exception,
-                        'message' => $message,
+                        'stage' => 'dispatch',
+                        'state' => $this->status->value,
+                        ...ProtocolLogContext::exception($exception),
+                        ...ProtocolLogContext::message($message),
                     ]);
 
                     continue;
@@ -292,14 +303,18 @@ final class Client implements ClientInterface
                 if ($response !== null) {
                     try {
                         $this->logger?->debug('Queueing the response message', [
-                            'message' => $response,
+                            ...ProtocolLogContext::message($response),
+                            'stage' => $response instanceof ConnectMessageInterface ? 'handshake' : 'response',
+                            'state' => $this->status->value,
                         ]);
 
                         $this->sendResponseMessage($response);
                     } catch (Throwable $exception) {
                         $this->logger?->error('An exception was thrown during sending the response message', [
-                            'exception' => $exception,
-                            'message' => $message,
+                            'stage' => 'response_write',
+                            'state' => $this->status->value,
+                            ...ProtocolLogContext::exception($exception),
+                            ...ProtocolLogContext::message($message),
                         ]);
                     }
                 }
@@ -326,8 +341,10 @@ final class Client implements ClientInterface
                 default => null,
             };
         } catch (CancelledException $exception) {
-            $this->logger?->error($exception->getMessage(), [
-                'exception' => $exception,
+            $this->logger?->error('Connection operation failed', [
+                'stage' => 'connection',
+                'state' => $this->status->value,
+                ...ProtocolLogContext::exception($exception),
             ]);
 
             throw $exception;
@@ -402,12 +419,12 @@ final class Client implements ClientInterface
 
         try {
             $this->logger?->debug('Sending "SUB" message', [
-                'message' => $message,
+                ...ProtocolLogContext::message($message),
             ]);
             $this->enqueueOutbound($message);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception was thrown while subscribing', [
-                'exception' => $exception,
+                ...ProtocolLogContext::exception($exception),
                 'sid' => $sid,
                 'subject' => $subject,
             ]);
@@ -449,7 +466,7 @@ final class Client implements ClientInterface
             $this->enqueueOutbound($message);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception was thrown while unsubscribing', [
-                'exception' => $exception,
+                ...ProtocolLogContext::exception($exception),
                 'sid' => $sid,
             ]);
 
@@ -513,7 +530,7 @@ final class Client implements ClientInterface
             return $deferred->getFuture()->await();
         } catch (Throwable $exception) {
             $this->logger?->error('An exception was thrown while performing the request', [
-                'exception' => $exception,
+                ...ProtocolLogContext::exception($exception),
             ]);
 
             throw $exception;
@@ -524,7 +541,7 @@ final class Client implements ClientInterface
                 } catch (Throwable $exception) {
                     $this->logger?->debug('Ignoring request cleanup unsubscribe failure', [
                         'sid' => $sid,
-                        'exception' => $exception,
+                        ...ProtocolLogContext::exception($exception),
                     ]);
                 }
             }
@@ -575,7 +592,7 @@ final class Client implements ClientInterface
             ): void {
                 $logger?->debug('Catch the event', [
                     'event' => $eventName,
-                    'payload' => $payload,
+                    'state' => $payload instanceof ClientState ? $payload->value : null,
                 ]);
 
                 if ($eventName !== self::STATUS_EVENT_NAME) {
@@ -613,7 +630,9 @@ final class Client implements ClientInterface
     {
         if (!$this->configuration->isReconnectEnabled()) {
             $this->logger?->warning('Reconnect is disabled. Stopping message processing.', [
-                'exception' => $reason,
+                'stage' => 'reconnect',
+                'state' => $this->status->value,
+                ...ProtocolLogContext::exception($reason),
             ]);
 
             $this->moveToState(ClientState::CLOSED, 'reconnect disabled');
@@ -635,7 +654,9 @@ final class Client implements ClientInterface
             if ($maxAttempts !== null && $attempt >= $maxAttempts) {
                 $this->logger?->error('Reconnect attempts are exhausted', [
                     'attempts' => $attempt,
-                    'exception' => $reason,
+                    'stage' => 'reconnect',
+                    'state' => $this->status->value,
+                    ...ProtocolLogContext::exception($reason),
                 ]);
 
                 $this->moveToState(ClientState::CLOSED, 'reconnect attempts exhausted');
@@ -673,8 +694,10 @@ final class Client implements ClientInterface
                 }
                 $this->logger?->warning('Reconnect attempt failed', [
                     'attempt' => $attempt,
-                    'server' => $server?->toUri(),
-                    'exception' => $exception,
+                    'server_selected' => $server !== null,
+                    'stage' => 'reconnect',
+                    'state' => $this->status->value,
+                    ...ProtocolLogContext::exception($exception),
                 ]);
             }
 
@@ -769,7 +792,7 @@ final class Client implements ClientInterface
             } catch (Throwable $exception) {
                 $this->logger?->debug('Ignoring unsubscribeAll failure during shutdown', [
                     'sid' => $sid,
-                    'exception' => $exception,
+                    ...ProtocolLogContext::exception($exception),
                 ]);
             }
         }
@@ -948,6 +971,11 @@ final class Client implements ClientInterface
 
         $this->awaitingInitialPong = false;
         $this->handshakeReady      = true;
+        $this->logger?->debug('NATS handshake completed', [
+            'command' => NatsMessageType::PONG->value,
+            'stage' => 'ready',
+            'state' => $this->status->value,
+        ]);
         if ($this->replaySubscriptionsOnReady) {
             $this->replaySubscriptionsOnReady = false;
             $this->restoreSubscriptionsImmediately();
@@ -1099,7 +1127,7 @@ final class Client implements ClientInterface
                 'frame_bytes' => $frame->bytes,
                 'pending_messages' => $this->writeBuffer->getPendingMessages(),
                 'pending_bytes' => $this->writeBuffer->getPendingBytes(),
-                'exception' => $exception,
+                ...ProtocolLogContext::exception($exception),
             ]);
 
             throw $exception;

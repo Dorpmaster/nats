@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Prevent connection credentials from reaching protocol logs before PSR-3 formatting. In previous versions, enabling DEBUG with the standard formatter could write connection credentials from CONNECT messages; handshake, reconnect, socket I/O, and error logs now use safe metadata without raw frames or payloads.
 - Preserve valid JetStream resource names such as `ORDERS@EU`, `ORDERS+EU`, and `WORKER@EU` by separating command-token safety checks from the existing Core publish subject rules.
 - Reject invalid JetStream stream and durable consumer names before API requests or pull inbox subscriptions. Validate outgoing PUB/HPUB subjects and reply-to fields, including direct transport frames, and reject trailing newlines in SUB/UNSUB command fields to prevent NATS command injection. Binary payloads and existing subscription patterns remain supported.
 

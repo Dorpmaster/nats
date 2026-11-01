@@ -139,3 +139,15 @@ failure detected
 - pending queue overflow is a controlled transport failure and never silently drops inbound messages.
 
 Handshake ordering is protected by a protocol conformance test using a fake NATS server. The client guarantees that application-level commands are buffered until the connection reaches READY (`INFO -> CONNECT -> PING/PONG`).
+
+## Protocol Logging
+
+`Client`, `MessageDispatcher`, and `Connection` emit selected scalar metadata
+before calling a PSR-3 logger: command type, handshake stage, client state, byte
+counts, and exception type/code. CONNECT objects, connection credentials, socket
+chunks, application payloads, and original exception messages/traces are omitted.
+The same policy applies after reconnect and to callback/write-buffer failures.
+
+DEBUG remains available with the worker's Monolog, `PsrLogMessageProcessor`, and
+AMPHP `ConsoleFormatter` setup. Credential transmission and protocol frames are
+unchanged. Application code still receives the original exceptions and causes.

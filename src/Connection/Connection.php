@@ -21,6 +21,7 @@ use Dorpmaster\Nats\Domain\Connection\ServerSelectableConnectionInterface;
 use Dorpmaster\Nats\Protocol\Contracts\InfoMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Parser\ProtocolParser;
+use Dorpmaster\Nats\Telemetry\ProtocolLogContext;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 use Throwable;
@@ -53,8 +54,7 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
 
         try {
             $this->logger?->debug('Starting to open TCP connection', [
-                'url' => $url,
-                'context' => $context,
+                'stage' => 'tcp_open',
                 'tls_enabled' => $tlsConfiguration->isEnabled(),
             ]);
 
@@ -65,7 +65,7 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
 
                 $this->logger?->debug('Starting TLS handshake', [
                     'verify_peer' => $tlsConfiguration->isVerifyPeer(),
-                    'server_name' => $tlsConfiguration->getServerName() ?? $this->configuration->getHost(),
+                    'stage' => 'tls_handshake',
                 ]);
                 $this->socket->setupTls($cancellation);
             }
@@ -74,12 +74,11 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
                 ? 'TLS handshake failed: ' . $exception->getMessage()
                 : $exception->getMessage();
 
-            $this->logger?->error($error, [
-                'url' => $url,
-                'exception' => $exception,
+            $this->logger?->error('Connection open failed', [
+                'stage' => $tlsConfiguration->isEnabled() ? 'tls_handshake' : 'tcp_open',
+                ...ProtocolLogContext::exception($exception),
                 'tls_enabled' => $tlsConfiguration->isEnabled(),
                 'verify_peer' => $tlsConfiguration->isVerifyPeer(),
-                'server_name' => $tlsConfiguration->getServerName() ?? $this->configuration->getHost(),
             ]);
 
             throw new ConnectionException($error, $exception->getCode(), $exception);
@@ -110,7 +109,7 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
                 $logger?->debug('Reading the socket');
 
                 while (null !== $chunk = $socket?->read($cancellation)) {
-                    $logger?->debug('A new chunk has received', ['chunk' => $chunk]);
+                    $logger?->debug('A new chunk has received', ['stage' => 'read', 'bytes' => strlen($chunk)]);
 
                     $parser->push($chunk);
 
@@ -127,7 +126,8 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
                 $queue->complete();
             } catch (Throwable $e) {
                 $logger?->error('An exception has occurred while reading the incoming stream', [
-                    'exception' => $e,
+                    'stage' => 'read',
+                    ...ProtocolLogContext::exception($e),
                 ]);
                 $queue->error($e);
             } finally {
@@ -168,7 +168,9 @@ final class Connection implements ConnectionInterface, ServerSelectableConnectio
             $this->socket?->write((string) $message);
         } catch (Throwable $exception) {
             $this->logger?->error('An exception has occurred while writing the socket', [
-                'exception' => $exception,
+                'stage' => 'write',
+                ...ProtocolLogContext::message($message),
+                ...ProtocolLogContext::exception($exception),
             ]);
 
             throw new ConnectionException($exception->getMessage(), $exception->getCode(), $exception);

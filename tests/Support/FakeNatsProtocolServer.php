@@ -133,6 +133,16 @@ final class FakeNatsProtocolServer
         $session?->socket->close();
     }
 
+    public function rejectAuthorization(int $sessionIndex, string $description): void
+    {
+        $session = $this->sessions[$sessionIndex] ?? null;
+        if ($session === null) {
+            throw new \RuntimeException('Session does not exist');
+        }
+        $session->socket->write("-ERR 'Authorization Violation " . $description . "'\r\n");
+        $session->socket->close();
+    }
+
     public function replyToLatestRequest(int $sessionIndex, string $payload = 'response'): void
     {
         $session = $this->sessions[$sessionIndex] ?? null;

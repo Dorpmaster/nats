@@ -21,6 +21,7 @@ use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\Metadata\ServerInfo;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
 use Dorpmaster\Nats\Protocol\PongMessage;
+use Dorpmaster\Nats\Telemetry\ProtocolLogContext;
 use Psr\Log\LoggerInterface;
 
 final class MessageDispatcher implements MessageDispatcherInterface
@@ -64,17 +65,19 @@ final class MessageDispatcher implements MessageDispatcherInterface
         assert($message instanceof InfoMessageInterface);
 
         $this->logger?->debug('Got the Info Message', [
-            'message' => $message,
+            ...ProtocolLogContext::message($message),
         ]);
 
         $this->serverInfo = $message->getServerInfo();
         $this->logger?->debug('Set the Server Info', [
-            'server_info' => $this->serverInfo,
+            'command' => NatsMessageType::INFO->value,
+            'stage' => 'server_info_set',
         ]);
 
         $responseMessage = new ConnectMessage($this->connectInfo);
         $this->logger?->debug('Returning back the Connect Message', [
-            'message' => $responseMessage,
+            ...ProtocolLogContext::message($responseMessage),
+            'stage' => 'connect_prepared',
         ]);
 
         return $responseMessage;
@@ -88,13 +91,13 @@ final class MessageDispatcher implements MessageDispatcherInterface
         );
 
         $this->logger?->debug('Got the Msg Message', [
-            'message' => $message,
+            ...ProtocolLogContext::message($message),
         ]);
 
         $closure = $this->storage->get($message->getSid());
         if ($closure === null) {
             $this->logger?->warning('Could not find a subscription handler for the Message', [
-                'message' => $message,
+                ...ProtocolLogContext::message($message),
                 'sid' => $message->getSid(),
             ]);
 
@@ -125,9 +128,9 @@ final class MessageDispatcher implements MessageDispatcherInterface
         }
 
         $this->logger?->error('Got a wrong response from the subscription handler for the Message', [
-            'message' => $message,
+            ...ProtocolLogContext::message($message),
             'sid' => $message->getSid(),
-            'response' => $response,
+            'response_type' => get_debug_type($response),
         ]);
 
         return null;
@@ -208,7 +211,9 @@ final class MessageDispatcher implements MessageDispatcherInterface
     private function processErr(NatsProtocolMessageInterface $message): null
     {
         $this->logger?->error('Got the Err Message', [
-            'message' => $message,
+            'stage' => 'server_error',
+            'error_category' => stripos($message->getPayload(), 'Authorization Violation') !== false ? 'authorization' : 'server',
+            ...ProtocolLogContext::message($message),
         ]);
 
         return null;

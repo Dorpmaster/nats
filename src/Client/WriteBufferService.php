@@ -16,6 +16,7 @@ use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
 use Dorpmaster\Nats\Domain\Telemetry\NullMetricsCollector;
+use Dorpmaster\Nats\Telemetry\ProtocolLogContext;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 
@@ -121,7 +122,7 @@ final class WriteBufferService implements WriteBufferInterface
             $this->deferredDrained->getFuture()->await(new TimeoutCancellation($timeout));
         } catch (\Throwable $exception) {
             $this->logger?->warning('Write buffer drain timeout', [
-                'exception' => $exception,
+                ...ProtocolLogContext::exception($exception),
                 'pending_messages' => $this->pendingMessages,
                 'pending_bytes' => $this->pendingBytes,
             ]);
