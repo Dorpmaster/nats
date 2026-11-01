@@ -71,3 +71,20 @@ until it settles; cancellation cannot recall bytes already handed to the transpo
 Ordinary frames keep their existing snapshot, FIFO order, overflow policy and
 failed-frame retry behavior. Writer lifecycle generations prevent a cancelled old
 loop from suppressing the writer for a newly attached connection.
+
+A streaming publish channel uses the same single-attempt lifetimes per frame.
+An attempt callback records the handed-off sequence immediately before send; a
+write receipt completes after the snapshot is written and accounting released.
+The persistent inbox has a separate connection-bound lifetime. Stopping a channel
+withdraws all unsent frames, including EOB and ping, while allowing final replies
+until session cleanup.
+
+Closing a publish channel cancels data and control lifetimes independently of
+stopping new data after a server error. EOB and ping cannot survive close in the
+paused queue. Fast session attempt callbacks recheck the absolute monotonic
+deadline before consuming a batch sequence or marking commit as attempted.
+
+Server-driven withdrawal completes queued send waiters without treating their
+local cancellation as a channel failure. The inbox lifetime remains active for
+final settlement; connection failure, explicit cancellation or the original
+deadline still closes it.

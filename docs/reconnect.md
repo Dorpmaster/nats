@@ -132,3 +132,9 @@ transport open, including a later `connect()` on the same Client. Failed CONNECT
 or handshake-PING sends use reconnect/close handling; they cannot suppress the
 handshake on the next connection. Replayed subscriptions still precede buffered
 application frames after the new transport reaches READY.
+
+Explicit `connect()` calls also advance a reader epoch. A blocked reader from an
+older connection exits when it wakes; it cannot dispatch an old message or start
+a reconnect against the replacement transport. Automatic reconnect retains the
+active reader, while transport-bound fast batch sessions stop and never replay
+their data or commit. A new session must pass admission again.

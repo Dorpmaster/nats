@@ -64,7 +64,7 @@ use Throwable;
 
 use function Amp\delay;
 
-final class Client implements ClientInterface, ServerInformationProviderInterface, ConnectionBoundRequestClientInterface
+final class Client implements ClientInterface, ServerInformationProviderInterface, ConnectionBoundRequestClientInterface, \Dorpmaster\Nats\Domain\Client\ConnectionBoundPublishClientInterface
 {
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
 
@@ -76,6 +76,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
     private ServerInfo|null $serverInformation                      = null;
     private DeferredCancellation|null $connectionRequests           = null;
     private int $connectionGeneration                               = 0;
+    private int $readerEpoch                                        = 0;
     private int $serverInformationRevision                          = 0;
     private bool $handshakeStarted                                  = false;
     private bool $handshakeReady                                    = false;
@@ -197,6 +198,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         }
 
         $this->moveToState(ClientState::CONNECTING, 'connect() started');
+        $readerEpoch = ++$this->readerEpoch;
 
         $server = $this->selectServerForConnect();
 
@@ -221,9 +223,9 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         $this->moveToState(ClientState::CONNECTED, 'open() succeeded');
 
         $this->logger?->debug('Starting a microtask that processes the messages');
-        EventLoop::queue(function () {
+        EventLoop::queue(function () use ($readerEpoch) {
             $this->logger?->debug('Starting to processes the messages');
-            while (in_array($this->status, [ClientState::CONNECTED, ClientState::RECONNECTING], true)) {
+            while ($readerEpoch === $this->readerEpoch && in_array($this->status, [ClientState::CONNECTED, ClientState::RECONNECTING], true)) {
                 $this->logger?->debug('Getting a message');
                 try {
                     $message = $this->connection->receive($this->cancellation);
@@ -232,18 +234,21 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
 
                     return;
                 } catch (Throwable $exception) {
-                    if (!$this->tryReconnect($exception)) {
+                    if ($readerEpoch !== $this->readerEpoch || !$this->tryReconnect($exception)) {
                         return;
                     }
 
                     continue;
                 }
 
+                if ($readerEpoch !== $this->readerEpoch) {
+                    return;
+                }
                 if ($message === null) {
                     $this->logger?->debug('No messages received');
 
                     if ($this->connection->isClosed()) {
-                        if (!$this->tryReconnect()) {
+                        if ($readerEpoch !== $this->readerEpoch || !$this->tryReconnect()) {
                             return;
                         }
                     }
@@ -299,7 +304,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
 
                     $response = $this->messageDispatcher->dispatch($message);
                 } catch (InboundDispatchOverflowException $exception) {
-                    if (!$this->tryReconnect($exception)) {
+                    if ($readerEpoch !== $this->readerEpoch || !$this->tryReconnect($exception)) {
                         return;
                     }
 
@@ -339,7 +344,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
                             if (!$this->configuration->isReconnectEnabled()) {
                                 $this->connection->close();
                             }
-                            if (!$this->tryReconnect($exception)) {
+                            if ($readerEpoch !== $this->readerEpoch || !$this->tryReconnect($exception)) {
                                 return;
                             }
                         }
@@ -402,6 +407,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         $this->writeBuffer->drain($timeoutMs);
 
         $this->unsubscribeAll();
+        $this->readerEpoch++;
         $this->connection->close();
         $this->moveToState(ClientState::CLOSED, 'drain() finished');
 
@@ -555,6 +561,26 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
             // Failures before performRequest's guarded write have not attempted socket I/O.
             throw new ConnectionBoundRequestException(false, $error);
         }
+    }
+
+    public function openPublishChannelOnConnection(string $inbox, Closure $onMessage, Closure $onFailure, int $connectionId, Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\Client\PublishChannelInterface
+    {
+        if (
+            $this->status !== ClientState::CONNECTED || !$this->handshakeReady || $this->connection->isClosed()
+            || $connectionId !== $this->connectionGeneration || $this->connectionRequests === null
+            || !$this->writeBuffer instanceof SingleAttemptWriteBufferInterface
+        ) {
+            throw new ConnectionBoundRequestException(false, new ConnectionException('The original ready connection is unavailable'));
+        }
+        $scope = new CompositeCancellation($this->cancellation, $this->connectionRequests->getCancellation(), $cancellation ?? new NullCancellation());
+        return new PublishChannel(
+            $scope,
+            fn (Closure $handler, RequestLifetime $lifetime): string => $this->subscribeInternal($inbox, $handler, request: $lifetime),
+            fn ($message, RequestLifetime $lifetime) => $this->enqueueOutbound($message, request: $lifetime),
+            fn (string $sid) => $this->unsubscribe($sid),
+            $onMessage,
+            $onFailure,
+        );
     }
 
     private function performRequest(PubMessageInterface|HPubMessageInterface $message, float $timeout, bool $once, Cancellation|null $scope = null): MsgMessageInterface|HMsgMessageInterface

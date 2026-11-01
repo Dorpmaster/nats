@@ -426,3 +426,11 @@ integration-jetstream-atomic-cluster: build
 .PHONY: integration-jetstream-atomic-routes
 integration-jetstream-atomic-routes: build
 	python3 tests/Support/run-jetstream-atomic-routes.py --image nats-client
+
+.PHONY: integration-jetstream-fast
+integration-jetstream-fast: build
+	python3 tests/Support/run-jetstream-fast.py
+
+.PHONY: integration-jetstream-fast-cluster
+integration-jetstream-fast-cluster: build
+	python3 tests/Support/run-jetstream-fast.py --cluster

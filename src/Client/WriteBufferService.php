@@ -276,6 +276,7 @@ final class WriteBufferService implements SingleAttemptWriteBufferInterface
             }
             $this->inFlight = null;
             $this->releaseFrame($frame);
+            $frame->request?->notifyWritten();
         }
     }
 

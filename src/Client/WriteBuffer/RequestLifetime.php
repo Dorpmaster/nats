@@ -16,7 +16,7 @@ final class RequestLifetime
     private Closure|null $onInactive = null;
 
     /** @param Closure(Throwable): void $onFailure */
-    public function __construct(private Closure|null $onFailure, private Cancellation|null $cancellation)
+    public function __construct(private Closure|null $onFailure, private Cancellation|null $cancellation, private Closure|null $onWritten = null, private Closure|null $onAttempt = null)
     {
     }
 
@@ -31,7 +31,26 @@ final class RequestLifetime
             return false;
         }
         $this->attempted = true;
+        $callback        = $this->onAttempt;
+        $this->onAttempt = null;
+        try {
+            $callback?->__invoke();
+        } catch (Throwable $error) {
+            $this->attempted = false;
+            $this->fail($error);
+            return false;
+        }
         return true;
+    }
+
+    public function notifyWritten(): void
+    {
+        if (!$this->active || $this->onWritten === null) {
+            return;
+        }
+        $callback = $this->onWritten;
+        $this->finish();
+        $callback();
     }
 
     /** @param Closure(): void $callback */
@@ -54,6 +73,8 @@ final class RequestLifetime
         $callback           = $this->onInactive;
         $this->onInactive   = null;
         $this->onFailure    = null;
+        $this->onWritten    = null;
+        $this->onAttempt    = null;
         $callback?->__invoke();
     }
 

@@ -245,3 +245,9 @@ leaf checks, including a stable mapping that previously bypassed STREAM.NAMES.
 The standalone matrix separately checks matching account mappings and replaces
 real successful final PubAcks with HMSG 504 and JSON 408, independently confirming
 the stored messages and exactly one commit.
+
+## Streaming fast batches
+
+For long sequences with incremental persistence acknowledgements and bounded
+producer credit, see [streaming publication](jetstream-fast-batch.md). This
+optional capability requires `allow_batched` and does not require `allow_atomic`.

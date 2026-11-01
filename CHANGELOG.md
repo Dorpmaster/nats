@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Add optional streaming JetStream fast batches (API level 4, `allow_batched`) with dynamic cumulative flow control, bounded message/byte credit, exact UInt64 progress, bounded ACK recovery, partial/unknown results, cancellation and connection-bound single-attempt writes. Preserve repeated headers and binary payloads without retaining the complete input stream.
+
 - Add optional atomic JetStream batch publishing with frozen message/header snapshots, ordinary and eob commit modes, exact UInt64 acknowledgements, one deadline, isolated cancellation and a connection-bound single-attempt lifetime. Report uncertain commit outcomes with the batch ID instead of continuing or replaying a batch after reconnect.
 
 - Add optional single-attempt consumer RESET with exact UInt64 stream positions, ACK-floor default, confirmed reset position and immutable ConsumerInfo from the same response. Validate names, deadlines, capability support and response identity without changing existing Admin interfaces or replaying uncertain/expired requests.
@@ -15,6 +17,12 @@ All notable changes to this project are documented in this file.
 - Add optional JetStream server capability contracts based on current-transport INFO `api_lvl`, configurable API prefixes, server `err_code` access, nullable atomic/batched publishing and consumer-limit stream options, and selected-field stream UPDATE with exact JSON configuration preservation and one operation deadline. Existing interfaces, constructors and dependency floors remain compatible.
 
 ### Fixed
+
+- Retain the fast batch reply inbox during server-error settlement: withdraw queued EOB/ping without closing the channel, wait for the final prefix acknowledgement within the original deadline, and preserve already confirmed progress when the final reply is lost.
+
+- Enforce fast batch deadlines synchronously before operations and queued writes, require admission before session construction, withdraw queued EOB/ping on cancellation, and accept deduplicated final acknowledgements with zero stream sequence.
+
+- Isolate the reader loop of each explicit client connection so a delayed EOF from a previous connection cannot close a freshly reconnected transport.
 
 - Preserve numeric JSON mapping names when checking atomic publish routes; unrelated numeric subjects no longer block batches, while matching mappings remain rejected and `0` stays distinct from `00`.
 

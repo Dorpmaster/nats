@@ -191,3 +191,13 @@ completes the request with its original cause before invoking normal reconnect
 handling. Legacy publication frames retain their replay semantics. The old public
 interfaces remain usable; unsupported optional single-attempt capabilities fail
 explicitly instead of silently downgrading mutation safety.
+
+## Streaming publication channels
+
+The optional `ConnectionBoundPublishClientInterface` owns a persistent inbox and
+per-frame single-attempt write receipts. The JetStream fast session owns flow
+credit, cumulative confirmations, its deadline and immutable terminal result.
+WriteBuffer consumes the attempt immediately before socket send and reports write
+completion after releasing frame accounting. No fast frame enters reconnect
+replay; legacy interfaces retain their behavior. See
+[streaming publication](jetstream-fast-batch.md).

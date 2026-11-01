@@ -27,7 +27,7 @@ use Throwable;
 
 use function Amp\delay;
 
-final readonly class JetStreamPublisher implements JetStreamAtomicPublisherInterface, JetStreamCapabilitiesProviderInterface
+final readonly class JetStreamPublisher implements JetStreamAtomicPublisherInterface, JetStreamFastBatchPublisherInterface, JetStreamCapabilitiesProviderInterface
 {
     private const int DEFAULT_TIMEOUT_MS = 2000;
 
@@ -40,6 +40,11 @@ final readonly class JetStreamPublisher implements JetStreamAtomicPublisherInter
     public function getCapabilities(): JetStreamCapabilities
     {
         return JetStreamCapabilities::forClient($this->client);
+    }
+
+    public function openFastBatch(string $stream, array $subjects, FastBatchOptions|null $options = null, mixed $timeoutMs = null): FastBatchSessionInterface
+    {
+        return FastBatchSession::open($this->client, $stream, $subjects, $options, $timeoutMs);
     }
 
     public function publishAtomicBatch(string $stream, array $messages, AtomicBatchOptions|null $options = null, mixed $timeoutMs = null): AtomicBatchAck

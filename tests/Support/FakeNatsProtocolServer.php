@@ -184,6 +184,11 @@ final class FakeNatsProtocolServer
         ));
     }
 
+    public function sendMessage(int $sessionIndex, string $subject, string $sid, string $payload): void
+    {
+        $this->sessions[$sessionIndex]->socket->write((string) new MsgMessage($subject, $sid, $payload));
+    }
+
     private function handleClient(FakeNatsSessionState $session): void
     {
         $buffer              = '';

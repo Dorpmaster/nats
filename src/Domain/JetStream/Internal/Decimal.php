@@ -35,6 +35,23 @@ final class Decimal
         return $value !== null && self::compare($value, (string) PHP_INT_MAX) <= 0 ? (int) $value : null;
     }
 
+    /** Add one without integer/float coercion. */
+    public static function increment(string $value): string
+    {
+        $value = self::parse($value, self::UINT64_MAX);
+        if ($value === self::UINT64_MAX) {
+            throw new InvalidArgumentException('UInt64 sequence overflow');
+        }
+        for ($index = strlen($value) - 1; $index >= 0; $index--) {
+            if ($value[$index] !== '9') {
+                $value[$index] = (string) ((int) $value[$index] + 1);
+                return $value;
+            }
+            $value[$index] = '0';
+        }
+        return '1' . $value;
+    }
+
     /** Subtract one from a positive canonical decimal. */
     public static function decrement(string $value): string
     {

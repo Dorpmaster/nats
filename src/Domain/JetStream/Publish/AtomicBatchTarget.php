@@ -34,8 +34,9 @@ final readonly class AtomicBatchTarget
         if ($level === null || preg_match('/\A(?:0|[1-9][0-9]*)\z/', $level) !== 1 || strlen($level) > 9 || (int) $level < $feature->minimumApiLevel()) {
             throw new JetStreamApiException(0, 'Atomic target stream mode support is not established: ' . $feature->value);
         }
-        if ((new MetadataFields($config, 'config'))->boolean('allow_atomic') !== true) {
-            throw new JetStreamApiException(400, 'Atomic publish is disabled for target stream', errorCode: 10174);
+        $permission = $feature === Feature::FAST_BATCH_PUBLISH ? 'allow_batched' : 'allow_atomic';
+        if ((new MetadataFields($config, 'config'))->boolean($permission) !== true) {
+            throw new JetStreamApiException(400, $permission === 'allow_atomic' ? 'Atomic publish is disabled for target stream' : 'Fast batch publish is disabled for target stream', errorCode: 10174);
         }
         foreach (array_unique($subjects) as $subject) {
             $names = $this->read('$JS.API.STREAM.NAMES', json_encode(['subject' => $subject], JSON_THROW_ON_ERROR), $connectionId, $deadline, $options);
