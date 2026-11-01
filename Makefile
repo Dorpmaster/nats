@@ -406,3 +406,11 @@ integration-jetstream-metadata: build
 .PHONY: integration-jetstream-metadata-cluster
 integration-jetstream-metadata-cluster: build
 	python3 tests/Support/run-jetstream-metadata.py --cluster
+
+.PHONY: integration-jetstream-reset
+integration-jetstream-reset: build
+	python3 tests/Support/run-jetstream-reset.py
+
+.PHONY: integration-jetstream-reset-cluster
+integration-jetstream-reset-cluster: build
+	python3 tests/Support/run-jetstream-reset.py --cluster

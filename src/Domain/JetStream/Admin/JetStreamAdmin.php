@@ -6,16 +6,20 @@ namespace Dorpmaster\Nats\Domain\JetStream\Admin;
 
 use Amp\CancelledException;
 use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilities;
+use Dorpmaster\Nats\Domain\JetStream\Capability\Feature;
+use Dorpmaster\Nats\Domain\JetStream\Capability\Support;
 use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilitiesProviderInterface;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamConfigurationUnconfirmedException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamTimeoutException;
 use Dorpmaster\Nats\Domain\JetStream\Internal\ResourceName;
+use Dorpmaster\Nats\Domain\JetStream\Internal\ApiError;
 use Dorpmaster\Nats\Domain\JetStream\Internal\Decimal;
 use Dorpmaster\Nats\Domain\JetStream\Internal\MetadataFields;
 use Dorpmaster\Nats\Domain\JetStream\Internal\LegacyMetadataResponse;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerInfo;
+use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerResetResult;
 use Dorpmaster\Nats\Domain\JetStream\Model\JsonObject;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfigPatch;
@@ -28,7 +32,7 @@ use JsonException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
-final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, JetStreamCapabilitiesProviderInterface
+final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, JetStreamResettingAdminInterface, JetStreamCapabilitiesProviderInterface
 {
     public function __construct(
         private JetStreamControlPlaneTransportInterface $transport,
@@ -249,6 +253,79 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         }
 
         return $this->mapConsumerInfo($response);
+    }
+
+    /** @param int|string|null $streamSequence Only these original types are accepted, in either caller mode. */
+    public function resetConsumer(
+        string $stream,
+        string $consumer,
+        mixed $streamSequence = null,
+        int|null $timeoutMs = null,
+    ): ConsumerResetResult {
+        ResourceName::validate($stream, 'stream');
+        ResourceName::validate($consumer, 'consumer');
+        // A scalar union would coerce float/bool before this method when called from a weak PHP file.
+        if ($streamSequence !== null && !is_int($streamSequence) && !is_string($streamSequence)) {
+            throw new InvalidArgumentException('Invalid streamSequence: expected int, string or null');
+        }
+        try {
+            $sequence = $streamSequence === null ? '0' : Decimal::parse((string) $streamSequence, Decimal::UINT64_MAX);
+        } catch (InvalidArgumentException $error) {
+            throw new InvalidArgumentException('Invalid streamSequence: expected an unsigned decimal UInt64', 0, $error);
+        }
+        $timeout = $timeoutMs ?? 2000;
+        if ($timeout <= 0) {
+            throw new InvalidArgumentException('Invalid timeoutMs: expected a positive duration');
+        }
+        if ($this->getCapabilities()->check(Feature::CONSUMER_RESET)->support === Support::UNSUPPORTED) {
+            throw new JetStreamApiException(0, 'Consumer RESET is unsupported by the current server API level');
+        }
+        if (!$this->transport instanceof JetStreamSingleAttemptTransportInterface) {
+            throw new JetStreamApiException(0, 'Consumer RESET requires JetStreamSingleAttemptTransportInterface to prevent replay');
+        }
+        // The validated decimal is written as a number token, never as a quoted PHP string or float.
+        $payload = new JsonObject($sequence === '0' ? '{}' : '{"seq":' . $sequence . '}');
+        $this->getLogger()->debug('js.admin.consumer.reset', ['operation' => 'consumer_reset', 'timeout_ms' => $timeout]);
+        try {
+            $response = $this->transport->requestJsonOnce('CONSUMER.RESET.' . $stream . '.' . $consumer, $payload, $timeout);
+            $apiError = ApiError::fromResponse(json_decode($response->toJson(), false, 512, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING), 0, 'JetStream consumer reset error');
+            if ($apiError !== null) {
+                throw $apiError;
+            }
+            try {
+                $fields = new MetadataFields($response, 'consumer_reset');
+                if ($fields->text('type') !== 'io.nats.jetstream.api.v1.consumer_reset_response') {
+                    throw new JetStreamApiException(0, 'Invalid consumer reset response type');
+                }
+                $resetSequence = $fields->decimal('reset_seq');
+                if ($resetSequence === null || $resetSequence === '0') {
+                    throw new JetStreamApiException(0, 'Invalid consumer reset response reset_seq');
+                }
+                $info          = $this->mapConsumerInfo($response);
+                $configuration = $info->getConfiguration();
+                if ($configuration !== null && $configuration->has('name') && (new MetadataFields($configuration, 'config'))->text('name') !== $consumer) {
+                    throw new JetStreamApiException(0, 'Consumer reset response config.name does not match consumer');
+                }
+                if ($info->getStreamName() !== $stream || $info->getName() !== $consumer || $info->getDurableName() !== $consumer) {
+                    throw new JetStreamApiException(0, 'Consumer reset response stream/consumer identity mismatch');
+                }
+            } catch (InvalidArgumentException | JsonException $error) {
+                throw new JetStreamApiException(0, 'Invalid consumer reset metadata: ' . $error->getMessage(), $error);
+            }
+            $this->getLogger()->debug('js.admin.consumer.reset.success', ['operation' => 'consumer_reset', 'ok' => true]);
+            return new ConsumerResetResult($resetSequence, $info);
+        } catch (\Throwable $error) {
+            if ($error instanceof CancelledException) {
+                $error = new JetStreamTimeoutException('JetStream consumer reset timed out', $error);
+            }
+            $this->getLogger()->warning('js.admin.consumer.reset.failed', [
+                'operation' => 'consumer_reset',
+                'error_type' => $error::class,
+                'code' => $error instanceof JetStreamApiException ? $error->getApiCode() : null,
+                'err_code' => $error instanceof JetStreamApiException ? $error->getErrorCode() : null,
+            ]);
+            throw $error;
+        }
     }
 
     public function deleteConsumer(string $stream, string $consumer): void

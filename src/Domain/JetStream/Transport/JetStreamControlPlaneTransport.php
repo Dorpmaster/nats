@@ -77,8 +77,8 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamSingleAt
 
     public function requestJson(string $apiSubjectSuffix, JsonObject $payload, int|null $timeoutMs = null): JsonObject
     {
-        // UPDATE must not become replayable through a direct transport call either.
-        return $this->performJsonRequest($apiSubjectSuffix, $payload, $timeoutMs, str_starts_with($apiSubjectSuffix, 'STREAM.UPDATE.'));
+        // Mutating delivery/configuration state must not become replayable through direct transport calls either.
+        return $this->performJsonRequest($apiSubjectSuffix, $payload, $timeoutMs, str_starts_with($apiSubjectSuffix, 'STREAM.UPDATE.') || str_starts_with($apiSubjectSuffix, 'CONSUMER.RESET.'));
     }
 
     public function requestJsonOnce(string $apiSubjectSuffix, JsonObject $payload, int|null $timeoutMs = null): JsonObject

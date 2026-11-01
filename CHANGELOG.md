@@ -6,11 +6,15 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Add optional single-attempt consumer RESET with exact UInt64 stream positions, ACK-floor default, confirmed reset position and immutable ConsumerInfo from the same response. Validate names, deadlines, capability support and response identity without changing existing Admin interfaces or replaying uncertain/expired requests.
+
 - Add optional JetStream ACK metadata and complete repeated-header views for fetch/consume, exact decimal counters and nanosecond timestamps, immutable stream/consumer state and raw configuration/response snapshots, and separate current/desired cluster and peer models. Preserve legacy getters, acknowledgement subjects, DROP_NEW and single-attempt UPDATE behavior.
 
 - Add optional JetStream server capability contracts based on current-transport INFO `api_lvl`, configurable API prefixes, server `err_code` access, nullable atomic/batched publishing and consumer-limit stream options, and selected-field stream UPDATE with exact JSON configuration preservation and one operation deadline. Existing interfaces, constructors and dependency floors remain compatible.
 
 ### Fixed
+
+- Reject original float/bool consumer RESET positions before PHP scalar coercion in either caller mode, and reject contradictory or non-string `config.name` in RESET confirmations. Preserve exact valid request tokens and the single-attempt lifetime.
 
 - Validate JSON string types for every stream subject and reject null before UPDATE, restore known object shapes for legacy array-only Admin transports, and validate textual metadata against raw JSON token types, including integers beyond PHP int.
 

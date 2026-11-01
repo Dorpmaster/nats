@@ -197,3 +197,91 @@ identifying `subjects` for an invalid field or element. INFO is read before this
 validation, and no modifying request is invoked on failure. `null` is invalid.
 An absent field is retained as absent (including mirror/source configurations);
 an explicit empty list is valid and remains `[]`.
+
+## Resetting consumer delivery state (planned 1.3.0)
+
+`JetStreamAdmin` implements the optional `JetStreamResettingAdminInterface`:
+
+```php
+public function resetConsumer(
+    string $stream,
+    string $consumer,
+    int|string|null $streamSequence = null,
+    ?int $timeoutMs = null,
+): ConsumerResetResult;
+
+$result = $admin->resetConsumer('ORDERS', 'C1'); // current stream ACK floor + 1
+$position = $result->getResetSequence(); // exact canonical decimal string from server
+$info = $result->getConsumerInfo(); // N2 ConsumerInfo from that same response
+$replay = $admin->resetConsumer('ORDERS', 'C1', '7', timeoutMs: 2000);
+```
+
+The interface retains the typed signature above. The concrete `JetStreamAdmin`
+uses `mixed $streamSequence` at its entry point (a compatible wider parameter)
+to inspect the original value before PHP can coerce scalar arguments. It accepts
+only actual `int`, `string` or `null` values. Floats, including `1.0`, booleans,
+arrays and objects raise `InvalidArgumentException` naming `streamSequence`
+before client actions, with the same behavior in weak and strict caller files.
+
+Existing `JetStreamAdminInterface` implementations do not acquire a new method.
+`ConsumerResetResult` is immutable; its two getters are mandatory. The built-in
+Admin sends one `<apiPrefix>.CONSUMER.RESET.<stream>.<consumer>` request and does
+not delete or recreate the consumer, probe INFO, or infer support from a timeout.
+
+Null, integer zero and decimal strings containing only zeroes send `{}`. The
+server chooses its current stream ACK floor plus one. Positive positions send a
+JSON number, for example `{"seq":7}`. Decimal strings follow the N2 normalization
+rules: ASCII digits only, leading zeroes removed, range 0..18446744073709551615.
+`"9223372036854775808"` is sent as `{"seq":9223372036854775808}`, without quoting
+or floating-point conversion. Negative values, signs, fractions, exponents,
+whitespace, invalid resource names and nonpositive timeouts fail locally before
+an inbox or request is created. The default local deadline is 2000 ms.
+
+The driver verifies the response type, stream/consumer identity, numeric positive
+UInt64 `reset_seq`, and the N2 metadata. If `config.name` is present it must be a
+JSON string equal to the requested consumer; an absent field is valid. A
+contradictory name or wrong JSON type (including a number beyond PHP int) raises
+`JetStreamApiException` identifying `config.name` after the one attempted RESET.
+This invalidates the confirmation; it cannot undo a reset already applied by the
+server. The returned position comes from the
+server, rather than echoing the requested position. A missing, malformed or
+inconsistent response raises `JetStreamApiException`. Server API errors preserve
+`code`, `err_code` and description. Supported delivery policies and restrictions
+such as the configured starting sequence are enforced by the server.
+
+`Feature::CONSUMER_RESET` requires API level 4. A known unsupported local target
+fails before any RESET. An unknown target, including a remote domain or imported
+API prefix, permits one explicit bounded attempt. A legacy transport without
+`JetStreamSingleAttemptTransportInterface` fails locally rather than silently
+using a replayable request. Direct built-in `request()`/`requestJson()` RESET
+requests also use the single-attempt path.
+
+RESET shares the N1 request lifetime: timeout or cancellation withdraws unsent
+request and inbox frames, releases local subscription/timer handlers, and settles
+the operation once. An uncertain write raises `RequestWriteException` with its
+original cause and never enters reconnect replay or `failedFrame`. Ordinary
+publication replay remains unchanged. Bytes already written cannot be recalled;
+a timeout or lost reply does not prove that the reset did not happen. Inspect
+state explicitly before deciding on another application-issued reset.
+
+A reset affects the shared consumer and every attached client. New consumer
+sequence numbers can start at 1 again; the first delivered stream sequence may
+exceed `reset_seq` if the requested record was deleted or does not match the
+filter. Reset does not restore messages removed by retention. On tested NATS
+2.14.0 and 2.15.2, an already waiting pull resumes with reset deliveries. Previously
+issued ACK subjects are not epoch-fenced: an old ACK can acknowledge a new
+delivery of the same stored record. Coordinate processing and outstanding ACKs
+across clients before resetting; metadata sequence pairs are not globally unique
+across resets.
+
+Run `make integration-jetstream-reset` for the pinned 2.12.6/2.14.0/2.15.2 matrix,
+and `make integration-jetstream-reset-cluster` for replicated state across a
+consumer leader change on 2.15.2. The runner can also save exact synthetic test
+requests, responses and delivery metadata with `--output /absolute/directory`.
+
+In the tested NATS 2.14.0 cross-account service import (`response: stream`), the
+server applies RESET but its RESET reply is not forwarded to the caller. The
+operation therefore times out with an uncertain outcome; it is not retried. A
+subsequent INFO through that import succeeds and can inspect the changed state.
+Local and domain-prefixed RESET work on 2.14.0; the same import roundtrip works on
+2.15.2. This observation is not used as a driver capability rule.

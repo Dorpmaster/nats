@@ -14,6 +14,9 @@ final class FakeNatsSessionState
     /** @var list<string> */
     public array $rawCommands = [];
 
+    /** @var list<array{command: string, payload: string}> */
+    public array $publications = [];
+
     public bool $connectReceived = false;
 
     public bool $pingReceived = false;

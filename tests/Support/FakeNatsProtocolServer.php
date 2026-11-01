@@ -99,6 +99,12 @@ final class FakeNatsProtocolServer
         return $this->sessions[$sessionIndex]->rawCommands ?? [];
     }
 
+    /** @return list<array{command: string, payload: string}> */
+    public function publications(int $sessionIndex): array
+    {
+        return $this->sessions[$sessionIndex]->publications ?? [];
+    }
+
     public function authorizationViolationSent(int $sessionIndex): bool
     {
         return $this->sessions[$sessionIndex]->authorizationViolationSent ?? false;
@@ -201,7 +207,8 @@ final class FakeNatsProtocolServer
                             throw new \RuntimeException('Malformed client payload delimiter');
                         }
 
-                        $buffer = (string) substr($buffer, $pendingPayloadBytes + 2);
+                        $buffer                  = (string) substr($buffer, $pendingPayloadBytes + 2);
+                        $session->publications[] = ['command' => (string) $pendingCommandLine, 'payload' => $payload];
                         $this->recordCommand($session, (string) $pendingCommandName, (string) $pendingCommandLine);
                         $this->handleApplicationCommand($session, (string) $pendingCommandName, (string) $pendingCommandLine, $payload);
 
