@@ -16,6 +16,7 @@ use Dorpmaster\Nats\Protocol\MsgMessage;
 use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LogLevel;
+use Revolt\EventLoop;
 
 final class JetStreamPullConsumerTest extends TestCase
 {
@@ -180,7 +181,7 @@ final class JetStreamPullConsumerTest extends TestCase
         self::assertNull($none);
     }
 
-    public function testFetchParsesDeliveryCountFromHeaders(): void
+    public function testFetchReadsDeliveryCountFromAckAndPreservesUserHeader(): void
     {
         // Arrange
         $handler = null;
@@ -199,13 +200,13 @@ final class JetStreamPullConsumerTest extends TestCase
         $helper->method('generateId')->willReturn('sid-5');
         $transport->method('publishRequest')
             ->willReturnCallback(function () use (&$handler): void {
-                $handler(new HMsgMessage(
+                EventLoop::queue(static fn() => $handler(new HMsgMessage(
                     subject: 'orders.created',
                     sid: '1',
                     payload: 'm1',
                     headers: new HeaderBag(['Nats-Num-Delivered' => '6']),
-                    replyTo: 'ACK.ORDERS.C1.1',
-                ));
+                    replyTo: '$JS.ACK.ORDERS.C1.2.10.11.1700000000000000000.0',
+                )));
             });
 
         $consumer = new JetStreamPullConsumer($transport, 'ORDERS', 'C1');
@@ -216,6 +217,7 @@ final class JetStreamPullConsumerTest extends TestCase
 
         // Assert
         self::assertCount(1, $messages);
-        self::assertSame(6, $messages[0]->getDeliveryCount());
+        self::assertSame(2, $messages[0]->getDeliveryCount());
+        self::assertSame('6', $messages[0]->getHeaders()['Nats-Num-Delivered']);
     }
 }

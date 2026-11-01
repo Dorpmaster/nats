@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Read JetStream delivery counts from validated classic or domain/account ACK subjects for MSG and HMSG, independently of opaque extension tokens including numeric tails. User `Nats-Num-Delivered` headers no longer influence automatic DROP_NEW termination; malformed or overflowing metadata yields an unknown count without interrupting message delivery.
+
 - Preserve ordinary HMSG headers containing `NATS/`, URLs and multiple colons, including repeated values in their original order. Recognize only the first, valid `NATS/1.0` preamble as protocol metadata while retaining separate statuses and received body sizes.
 
 - Wait for asynchronous JetStream `fetch(noWait: true)` replies and server completion instead of removing the inbox immediately. Keep a separate local timeout, preserve HMSG status codes/descriptions (including status-only frames), handle heartbeat and byte-limit completion, and clean up each request independently on success or failure.

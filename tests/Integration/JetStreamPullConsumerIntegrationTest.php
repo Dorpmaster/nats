@@ -31,8 +31,11 @@ use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
 use Dorpmaster\Nats\Tests\Support\HMsgHeaderCases;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+
+use function Amp\delay;
 
 final class JetStreamPullConsumerIntegrationTest extends TestCase
 {
@@ -300,7 +303,94 @@ final class JetStreamPullConsumerIntegrationTest extends TestCase
         }
     }
 
-    private function createClient(EventDispatcher|null $events = null): Client
+    public static function deliveryFrameTypes(): iterable
+    {
+        yield 'MSG' => [null];
+        yield 'HMSG conflicting user header' => ['999'];
+    }
+
+    #[DataProvider('deliveryFrameTypes')]
+    public function testAckMetadataTracksNakRedeliveryForRealMsgAndHmsg(string|null $userCount): void
+    {
+        self::requireJetStreamMode();
+        $logger        = new RecordingLogger();
+        $events        = new EventDispatcher();
+        $reconnections = 0;
+        $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$reconnections): void {
+            if ($state === ClientState::RECONNECTING) {
+                $reconnections++;
+            }
+        });
+        $client    = $this->createClient($events, $logger);
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $token     = strtoupper(bin2hex(random_bytes(6)));
+        $stream    = 'DELIVERY_' . $token;
+        $subject   = 'delivery.' . $token;
+        $payload   = "first and repeated\r\n\0NATS payload\r\n";
+        $created   = false;
+        try {
+            $client->connect();
+            $admin->createStream(new StreamConfig($stream, [$subject]));
+            $created = true;
+            $admin->createOrUpdateConsumer($stream, new ConsumerConfig('C1', ackWaitMs: 30000, filterSubject: $subject));
+            $headers = $userCount === null ? [] : ['Nats-Num-Delivered' => $userCount];
+            (new JetStreamPublisher($client))->publish($subject, $payload, PublishOptions::create(headers: $headers));
+            $pull       = (new JetStreamPullConsumerFactory($transport))->create($stream, 'C1');
+            $firstReply = null;
+            foreach ([1, 2] as $expectedCount) {
+                $before = count($logger->all());
+                $result = $pull->fetch(1, 2000);
+                self::assertSame(1, $result->getReceivedCount());
+                $message = iterator_to_array($result->messages())[0];
+                self::assertSame($expectedCount, $message->getDeliveryCount());
+                self::assertSame($payload, $message->getPayload());
+                self::assertSame($headers, $message->getHeaders());
+                self::assertStringStartsWith('$JS.ACK.', $message->getReplyTo());
+                $records    = array_slice($logger->all(), $before);
+                $dataFrames = array_values(array_filter($records, static fn(array $record): bool => $record['message'] === 'Dispatching the message'
+                    && in_array($record['context']['command'] ?? null, ['MSG', 'HMSG'], true)));
+                self::assertCount(1, $dataFrames);
+                self::assertSame($userCount === null ? 'MSG' : 'HMSG', $dataFrames[0]['context']['command']);
+                $tokens = explode('.', $message->getReplyTo());
+                if (getenv('NATS_ACK_FORMAT') === 'classic') {
+                    self::assertCount(9, $tokens);
+                } elseif (getenv('NATS_ACK_FORMAT') === 'expanded') {
+                    self::assertGreaterThanOrEqual(11, count($tokens));
+                    self::assertSame('EU', $tokens[2]);
+                }
+                if ($expectedCount === 1) {
+                    $firstReply = $message->getReplyTo();
+                    $result->getAcker()->nak($message);
+                } else {
+                    self::assertNotSame($firstReply, $message->getReplyTo());
+                    $result->getAcker()->ack($message);
+                }
+            }
+            $deadline = hrtime(true) + 2_000_000_000;
+            do {
+                $info = $admin->getConsumerInfo($stream, 'C1');
+                if ($info->getNumAckPending() === 0 && $info->getNumPending() === 0) {
+                    break;
+                }
+                delay(0.01);
+            } while (hrtime(true) < $deadline);
+            self::assertSame(0, $info->getNumAckPending());
+            self::assertSame(0, $info->getNumPending());
+            self::assertSame(0, $pull->fetch(1, 1000, true)->getReceivedCount());
+            self::assertSame(0, $reconnections);
+        } finally {
+            try {
+                if ($created) {
+                    $admin->deleteStream($stream);
+                }
+            } finally {
+                $client->disconnect();
+            }
+        }
+    }
+
+    private function createClient(EventDispatcher|null $events = null, RecordingLogger|null $logger = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
@@ -330,6 +420,7 @@ final class JetStreamPullConsumerIntegrationTest extends TestCase
             eventDispatcher: $eventDispatcher,
             messageDispatcher: $messageDispatcher,
             storage: $storage,
+            logger: $logger,
         );
     }
 

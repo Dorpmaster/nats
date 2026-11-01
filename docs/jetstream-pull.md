@@ -102,8 +102,27 @@ Backpressure is local to consume handle and based on delivered-but-not-released 
 
 `DROP_NEW` does **not** auto-ack dropped messages. They remain unacknowledged and may be redelivered by JetStream.
 Guard behavior:
-- if header `Nats-Num-Delivered` is present and value is `> 5`, dropped message is auto-terminated (`+TERM`)
-- if header is absent, guard is not applied
+- only a dropped message with an ACK-subject delivery count **greater than 5** is
+  auto-terminated (`+TERM`);
+- counts up to 5 inclusive and unknown counts (`null`) do not trigger automatic TERM;
+- messages accepted for processing are not terminated just because their count is high.
+
+`getDeliveryCount()` reads the original reply subject for both MSG and HMSG:
+
+- classic: `$JS.ACK.<stream>.<consumer>.<delivered>.<sseq>.<cseq>.<timestamp>.<pending>`;
+- expanded: `$JS.ACK.<domain>.<account>.<stream>.<consumer>.<delivered>.<sseq>.<cseq>.<timestamp>.<pending>`
+  with optional trailing extension tokens. `_` is the supported empty-domain placeholder.
+
+The prefix, nonempty tokens and decimal metadata fields are validated. Delivery
+counts must be positive ASCII decimal integers representable in PHP `int`; signs,
+exponent notation, whitespace and overflow are rejected. Leading zeroes
+are accepted without changing the original reply subject. An absent, malformed or
+unsupported ACK subject yields `null` and does not prevent message delivery.
+`Nats-Num-Delivered` remains an ordinary user header and never supplies or overrides
+the count. Additional valid tokens are opaque: their contents, length and number
+do not change the delivery count. A dot is always a field separator; the parser
+validates the resulting token sequence without inferring fractional notation.
+ACK/NAK/TERM use the exact original reply subject, without reconstruction.
 
 ## Reconnect Behavior
 
