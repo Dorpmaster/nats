@@ -20,6 +20,11 @@ final class RequestLifetime
     {
     }
 
+    public function wasAttempted(): bool
+    {
+        return $this->attempted;
+    }
+
     public function beginAttempt(): bool
     {
         if (!$this->active || $this->attempted || $this->cancellation?->isRequested()) {

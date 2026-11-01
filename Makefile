@@ -414,3 +414,15 @@ integration-jetstream-reset: build
 .PHONY: integration-jetstream-reset-cluster
 integration-jetstream-reset-cluster: build
 	python3 tests/Support/run-jetstream-reset.py --cluster
+
+.PHONY: integration-jetstream-atomic
+integration-jetstream-atomic: build
+	python3 tests/Support/run-jetstream-atomic.py
+
+.PHONY: integration-jetstream-atomic-cluster
+integration-jetstream-atomic-cluster: build
+	python3 tests/Support/run-jetstream-atomic.py --cluster
+
+.PHONY: integration-jetstream-atomic-routes
+integration-jetstream-atomic-routes: build
+	python3 tests/Support/run-jetstream-atomic-routes.py --image nats-client

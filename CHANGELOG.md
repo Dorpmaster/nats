@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Add optional atomic JetStream batch publishing with frozen message/header snapshots, ordinary and eob commit modes, exact UInt64 acknowledgements, one deadline, isolated cancellation and a connection-bound single-attempt lifetime. Report uncertain commit outcomes with the batch ID instead of continuing or replaying a batch after reconnect.
+
 - Add optional single-attempt consumer RESET with exact UInt64 stream positions, ACK-floor default, confirmed reset position and immutable ConsumerInfo from the same response. Validate names, deadlines, capability support and response identity without changing existing Admin interfaces or replaying uncertain/expired requests.
 
 - Add optional JetStream ACK metadata and complete repeated-header views for fetch/consume, exact decimal counters and nanosecond timestamps, immutable stream/consumer state and raw configuration/response snapshots, and separate current/desired cluster and peer models. Preserve legacy getters, acknowledgement subjects, DROP_NEW and single-attempt UPDATE behavior.
@@ -13,6 +15,12 @@ All notable changes to this project are documented in this file.
 - Add optional JetStream server capability contracts based on current-transport INFO `api_lvl`, configurable API prefixes, server `err_code` access, nullable atomic/batched publishing and consumer-limit stream options, and selected-field stream UPDATE with exact JSON configuration preservation and one operation deadline. Existing interfaces, constructors and dependency floors remain compatible.
 
 ### Fixed
+
+- Preserve numeric JSON mapping names when checking atomic publish routes; unrelated numeric subjects no longer block batches, while matching mappings remain rejected and `0` stays distinct from `00`.
+
+- Require live server/account monitoring to certify an isolated atomic publish route across every cluster peer, rejecting matching mappings/imports/exports and leaf/gateway exits before any batch HPUB. Fail closed when diagnostic access or topology proof is unavailable. Treat generic JSON errors without a JetStream-specific code, JSON 408 and intermediary HMSG errors after attempted commit as uncertain, retaining batch identity, codes and causes.
+
+- Parse empty MSG payloads without asking the byte parser to read zero bytes; validate the trailing CRLF and preserve subsequent frames across fragmented input.
 
 - Reject original float/bool consumer RESET positions before PHP scalar coercion in either caller mode, and reject contradictory or non-string `config.name` in RESET confirmations. Preserve exact valid request tokens and the single-attempt lifetime.
 

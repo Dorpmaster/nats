@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Client;
 
 use Amp\Cancellation;
+use Amp\NullCancellation;
+use Dorpmaster\Nats\Domain\Client\ConnectionBoundRequestClientInterface;
+use Dorpmaster\Nats\Domain\Client\ConnectionBoundRequestException;
 use Dorpmaster\Nats\Client\WriteBuffer\RequestLifetime;
-use Dorpmaster\Nats\Domain\Client\SingleAttemptRequestClientInterface;
 use Dorpmaster\Nats\Domain\Client\SingleAttemptWriteBufferInterface;
 use Amp\CancelledException;
 use Amp\CompositeCancellation;
@@ -62,7 +64,7 @@ use Throwable;
 
 use function Amp\delay;
 
-final class Client implements ClientInterface, ServerInformationProviderInterface, SingleAttemptRequestClientInterface
+final class Client implements ClientInterface, ServerInformationProviderInterface, ConnectionBoundRequestClientInterface
 {
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
 
@@ -72,6 +74,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
     private int $reconnectBackoffEpoch                              = 0;
     private int|null $activeReconnectBackoffEpoch                   = null;
     private ServerInfo|null $serverInformation                      = null;
+    private DeferredCancellation|null $connectionRequests           = null;
     private int $connectionGeneration                               = 0;
     private int $serverInformationRevision                          = 0;
     private bool $handshakeStarted                                  = false;
@@ -527,7 +530,34 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         return $this->performRequest($message, $timeout, true);
     }
 
-    private function performRequest(PubMessageInterface|HPubMessageInterface $message, float $timeout, bool $once): MsgMessageInterface|HMsgMessageInterface
+    public function requestOnceOnConnection(
+        PubMessageInterface|HPubMessageInterface $message,
+        int $connectionId,
+        float $timeout = 30,
+        Cancellation|null $cancellation = null,
+    ): MsgMessageInterface|HMsgMessageInterface {
+        if (
+            $this->status !== ClientState::CONNECTED || !$this->handshakeReady || $this->connection->isClosed()
+            || $connectionId !== $this->connectionGeneration || $this->connectionRequests === null
+            || !$this->writeBuffer instanceof SingleAttemptWriteBufferInterface
+        ) {
+            throw new ConnectionBoundRequestException(false, new ConnectionException('The original ready connection is unavailable'));
+        }
+        try {
+            if ($timeout <= 0 || !is_finite($timeout)) {
+                throw new \InvalidArgumentException('Invalid timeout: expected a positive finite duration');
+            }
+            $scope = new CompositeCancellation($this->connectionRequests->getCancellation(), $cancellation ?? new NullCancellation());
+            return $this->performRequest($message, $timeout, true, $scope);
+        } catch (ConnectionBoundRequestException $error) {
+            throw $error;
+        } catch (Throwable $error) {
+            // Failures before performRequest's guarded write have not attempted socket I/O.
+            throw new ConnectionBoundRequestException(false, $error);
+        }
+    }
+
+    private function performRequest(PubMessageInterface|HPubMessageInterface $message, float $timeout, bool $once, Cancellation|null $scope = null): MsgMessageInterface|HMsgMessageInterface
     {
         if (in_array($this->status, [ClientState::DRAINING, ClientState::CLOSED], true)) {
             throw new ConnectionException(sprintf('Could not request while client state is %s', $this->status->value));
@@ -553,6 +583,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         $cancellation = new CompositeCancellation(
             $this->cancellation,
             new TimeoutCancellation($timeout),
+            $scope ?? new NullCancellation(),
         );
 
         $deferred        = new DeferredFuture();
@@ -593,6 +624,9 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
                 ...ProtocolLogContext::exception($exception),
             ]);
 
+            if ($scope !== null) {
+                throw new ConnectionBoundRequestException($requestLifetime?->wasAttempted() ?? false, $exception);
+            }
             throw $exception;
         } finally {
             $requestLifetime?->finish();
@@ -690,6 +724,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
 
     private function tryReconnect(Throwable|null $reason = null): bool
     {
+        $this->connectionRequests?->cancel($reason);
         if (!$this->configuration->isReconnectEnabled()) {
             $this->logger?->warning('Reconnect is disabled. Stopping message processing.', [
                 'stage' => 'reconnect',
@@ -914,6 +949,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         }
 
         if ($from === ClientState::CONNECTED && $to !== ClientState::CONNECTED) {
+            $this->connectionRequests?->cancel(new ConnectionException('The original connection lifetime ended'));
             $this->pingService->stop();
         }
 
@@ -933,7 +969,8 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
     private function applyConnectedTransitionEffects(ClientState $from): void
     {
         $this->connectionGeneration++;
-        $this->serverInformation = null;
+        $this->connectionRequests = new DeferredCancellation();
+        $this->serverInformation  = null;
         $this->inboundDispatchScheduler->reset();
         $this->handshakeStarted      = false;
         $this->handshakeReady        = false;

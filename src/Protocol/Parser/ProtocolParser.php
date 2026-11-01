@@ -90,7 +90,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
         }
 
         $payloadSize = (int) $size;
-        $payload     = yield $payloadSize;
+        $payload     = $payloadSize === 0 ? '' : yield $payloadSize;
 
         $delimiter = yield 2;
         if ($delimiter !== NatsProtocolMessageInterface::DELIMITER) {

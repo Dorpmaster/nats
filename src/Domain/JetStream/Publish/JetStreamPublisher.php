@@ -14,6 +14,7 @@ use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamTimeoutException;
 use Dorpmaster\Nats\Domain\JetStream\Internal\ApiError;
 use Dorpmaster\Nats\Domain\JetStream\Model\JsonObject;
 use Dorpmaster\Nats\Domain\JetStream\Model\PubAck;
+use Dorpmaster\Nats\Domain\JetStream\Model\AtomicBatchAck;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
 use Dorpmaster\Nats\Protocol\HPubMessage;
@@ -26,7 +27,7 @@ use Throwable;
 
 use function Amp\delay;
 
-final readonly class JetStreamPublisher implements JetStreamPublisherInterface, JetStreamCapabilitiesProviderInterface
+final readonly class JetStreamPublisher implements JetStreamAtomicPublisherInterface, JetStreamCapabilitiesProviderInterface
 {
     private const int DEFAULT_TIMEOUT_MS = 2000;
 
@@ -39,6 +40,11 @@ final readonly class JetStreamPublisher implements JetStreamPublisherInterface, 
     public function getCapabilities(): JetStreamCapabilities
     {
         return JetStreamCapabilities::forClient($this->client);
+    }
+
+    public function publishAtomicBatch(string $stream, array $messages, AtomicBatchOptions|null $options = null, mixed $timeoutMs = null): AtomicBatchAck
+    {
+        return (new AtomicBatchPublisher($this->client, $this->getLogger()))->publish($stream, $messages, $options, $timeoutMs);
     }
 
     public function publish(
