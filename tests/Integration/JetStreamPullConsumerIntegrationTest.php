@@ -12,6 +12,7 @@ use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\MessageDispatcher;
 use Dorpmaster\Nats\Client\SubscriptionStorage;
 use Dorpmaster\Nats\Connection\Connection;
+use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
 use Dorpmaster\Nats\Domain\JetStream\Admin\JetStreamAdmin;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerConfig;
@@ -22,6 +23,7 @@ use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class JetStreamPullConsumerIntegrationTest extends TestCase
@@ -114,7 +116,104 @@ final class JetStreamPullConsumerIntegrationTest extends TestCase
         }
     }
 
-    private function createClient(): Client
+    public static function availableBatches(): iterable
+    {
+        yield 'full one' => [1, 1];
+        yield 'partial two of five' => [2, 5];
+        yield 'empty' => [0, 5];
+    }
+
+    #[DataProvider('availableBatches')]
+    public function testNoWaitReceivesAvailableBatchAndKeepsConnectionUsable(int $available, int $batch): void
+    {
+        self::requireJetStreamMode();
+        $reconnections = 0;
+        $events        = new EventDispatcher();
+        $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$reconnections): void {
+            if ($state === ClientState::RECONNECTING) {
+                $reconnections++;
+            }
+        });
+        $client = $this->createClient($events);
+        $client->connect();
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $publisher = new JetStreamPublisher($client);
+        $stream    = 'NOWAIT_' . $available;
+        $subject   = 'nowait.' . $available;
+        $admin->createStream(new StreamConfig($stream, [$subject]));
+        $admin->createOrUpdateConsumer($stream, new ConsumerConfig('C1', filterSubject: $subject));
+        try {
+            $expected = [];
+            for ($i = 0; $i < $available; $i++) {
+                $expected[] = "msg-$i\r\n\0";
+                $publisher->publish($subject, $expected[$i]);
+            }
+
+            $pull     = (new JetStreamPullConsumerFactory($transport))->create($stream, 'C1');
+            $start    = hrtime(true);
+            $result   = $pull->fetch($batch, 3000, true, idleHeartbeatMs: 100);
+            $elapsed  = hrtime(true) - $start;
+            $messages = iterator_to_array($result->messages());
+            self::assertSame($available, $result->getReceivedCount());
+            self::assertSame($expected, array_map(static fn($message): string => $message->getPayload(), $messages));
+            self::assertLessThan(2_000_000_000, $elapsed, 'Server completion must precede the local deadline');
+            foreach ($messages as $message) {
+                $result->getAcker()->ack($message);
+            }
+
+            // Both the API request and the next pull use the existing connected client.
+            self::assertSame(0, $admin->getConsumerInfo($stream, 'C1')->getNumPending());
+            self::assertSame(0, $pull->fetch(1, 1000, true)->getReceivedCount());
+            self::assertSame(0, $reconnections);
+        } finally {
+            $admin->deleteConsumer($stream, 'C1');
+            $admin->deleteStream($stream);
+            $client->disconnect();
+        }
+    }
+
+    public function testNoWaitMaxBytesReturnsPartialBatchAndKeepsConnectionUsable(): void
+    {
+        self::requireJetStreamMode();
+        $reconnections = 0;
+        $events        = new EventDispatcher();
+        $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$reconnections): void {
+            if ($state === ClientState::RECONNECTING) {
+                $reconnections++;
+            }
+        });
+        $client = $this->createClient($events);
+        $client->connect();
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $publisher = new JetStreamPublisher($client);
+        $stream    = 'NOWAIT_BYTES';
+        $subject   = 'nowait.bytes';
+        $admin->createStream(new StreamConfig($stream, [$subject]));
+        $admin->createOrUpdateConsumer($stream, new ConsumerConfig('C1', filterSubject: $subject));
+        try {
+            $publisher->publish($subject, 'short');
+            $publisher->publish($subject, str_repeat('large', 300));
+            $pull   = (new JetStreamPullConsumerFactory($transport))->create($stream, 'C1');
+            $start  = hrtime(true);
+            $result = $pull->fetch(5, 3000, true, 300);
+            self::assertSame(1, $result->getReceivedCount());
+            self::assertLessThan(2_000_000_000, hrtime(true) - $start);
+            $message = iterator_to_array($result->messages())[0];
+            self::assertSame('short', $message->getPayload());
+            $result->getAcker()->ack($message);
+            self::assertSame(1, $admin->getConsumerInfo($stream, 'C1')->getNumPending());
+            self::assertSame(1, $pull->fetch(1, 1000, true)->getReceivedCount());
+            self::assertSame(0, $reconnections);
+        } finally {
+            $admin->deleteConsumer($stream, 'C1');
+            $admin->deleteStream($stream);
+            $client->disconnect();
+        }
+    }
+
+    private function createClient(EventDispatcher|null $events = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
@@ -123,7 +222,7 @@ final class JetStreamPullConsumerIntegrationTest extends TestCase
 
         $connection          = new Connection($connector, $config);
         $clientConfiguration = new ClientConfiguration();
-        $eventDispatcher     = new EventDispatcher();
+        $eventDispatcher     = $events ?? new EventDispatcher();
 
         $connectionInfo    = new ConnectInfo(
             verbose: false,

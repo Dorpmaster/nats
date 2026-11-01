@@ -22,6 +22,21 @@ Outbound sending is implemented by `WriteBufferService`.
 
 Inbound application dispatch uses a separate bounded scheduler. `WriteBufferService` is not responsible for limiting inbound callback concurrency or pending inbound queue growth.
 
+## Frame Snapshot
+
+`OutboundFrameBuilder` serializes the message once immediately before enqueueing.
+The resulting `OutboundFrame::data` and `bytes` are the queue's wire snapshot:
+`pendingBytes` accounts for the complete frame, including its command and delimiters.
+The writer passes that same frame to `ConnectionInterface::send()`; its string
+representation returns the saved bytes, including on retry after a failed write.
+The connection interface and its method signatures are unchanged.
+
+Before this snapshot, HPUB retains the caller's mutable header bag, including
+changes through `getHeaders()`. Each serialization reads the header block once
+and calculates both declared lengths from those bytes. Size getters reflect the
+current bag. Mutations after enqueueing affect future snapshots, while the queued
+frame and its accounting retain their original bytes.
+
 ## Reconnect Behavior
 
 - when connection changes, writer loop is re-bound to new connection;

@@ -234,7 +234,7 @@ final class WriteBufferService implements WriteBufferInterface
             }
 
             try {
-                $connection->send($frame->message);
+                $connection->send($frame);
             } catch (\Throwable $exception) {
                 $this->failedFrame = $frame;
                 ($this->failureHandler)?->__invoke($exception);

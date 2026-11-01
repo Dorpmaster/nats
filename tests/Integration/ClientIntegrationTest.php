@@ -15,10 +15,13 @@ use Dorpmaster\Nats\Client\Client;
 use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\MessageDispatcher;
 use Dorpmaster\Nats\Client\SubscriptionStorage;
+use Dorpmaster\Nats\Client\WriteBufferService;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneHeadersRequestMessage;
 use Dorpmaster\Nats\Event\EventDispatcher;
+use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
@@ -28,6 +31,7 @@ use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
 use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ClientIntegrationTest extends TestCase
@@ -121,6 +125,72 @@ final class ClientIntegrationTest extends TestCase
                 $client->disconnect();
             }
         });
+    }
+
+    #[DataProvider('headerPublishImplementations')]
+    public function testMutableHeaderPublishRoundtripUsesQueuedBytes(bool $jetstream, bool $withReply): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function () use ($jetstream, $withReply): void {
+            $buffer   = new WriteBufferService(100, 100000);
+            $client   = $this->createClient(headers: true, writeBuffer: $buffer);
+            $token    = bin2hex(random_bytes(6));
+            $subject  = 'it.hpub.snapshot.' . $token;
+            $probe    = 'it.hpub.probe.' . $token;
+            $replyTo  = $withReply ? 'it.hpub.reply.' . $token : null;
+            $received = new DeferredFuture();
+            $headers  = new HeaderBag(['X' => 'a']);
+            $payload  = "AB\r\n\0PUB is-payload 1\r\nZ\0";
+            $message  = $jetstream
+                ? new JetStreamControlPlaneHeadersRequestMessage($subject, $payload, $headers, $replyTo)
+                : new HPubMessage($subject, $payload, $headers, $replyTo);
+
+            try {
+                $client->connect();
+                $client->subscribe($subject, static function (NatsProtocolMessageInterface $message) use ($received): null {
+                    if (!$received->isComplete()) {
+                        $received->complete($message);
+                    }
+                    return null;
+                });
+                $client->subscribe($probe, static fn (NatsProtocolMessageInterface $message): PubMessage => new PubMessage((string) $message->getReplyTo(), 'ready'));
+                self::assertSame('ready', $client->request(new PubMessage($probe, 'before'), 2)->getPayload());
+                $this->forceTick(); // Flush the probe's inbox unsubscribe before measuring bytes.
+
+                $message->getHeaders()->set('X', ['abcdefgh', 'second']);
+                $headers->set('Z', 'last');
+                $snapshot = (string) $message;
+                $buffer->pause();
+                $this->forceTick(); // Let the paused writer finish before enqueue/resume.
+                $client->publish($message);
+                self::assertSame(strlen($snapshot), $buffer->getPendingBytes());
+                $headers->set('X', 'changed after enqueue');
+                $headers->set('Z', 'also changed');
+                $buffer->resume();
+
+                $actual = $received->getFuture()->await(new TimeoutCancellation(2));
+                self::assertInstanceOf(HMsgMessageInterface::class, $actual);
+                self::assertSame($payload, $actual->getPayload());
+                self::assertSame($replyTo, $actual->getReplyTo());
+                self::assertSame(['X', 'Z'], $actual->getHeaders()->names());
+                self::assertSame(['abcdefgh', 'second'], $actual->getHeaders()->get('X'));
+                self::assertSame('last', $actual->getHeaders()->get('Z'));
+                self::assertSame(0, $buffer->getPendingBytes());
+                self::assertSame(0, $buffer->getPendingMessages());
+                self::assertSame('ready', $client->request(new PubMessage($probe, 'after'), 2)->getPayload());
+            } finally {
+                $client->disconnect();
+            }
+        });
+    }
+
+    public static function headerPublishImplementations(): iterable
+    {
+        foreach ([false, true] as $jetstream) {
+            foreach ([false, true] as $withReply) {
+                yield ($jetstream ? 'jetstream' : 'core') . ($withReply ? '-reply' : '-no-reply') => [$jetstream, $withReply];
+            }
+        }
     }
 
     public function testRequestReply(): void
@@ -223,7 +293,7 @@ final class ClientIntegrationTest extends TestCase
         });
     }
 
-    private function createClient(bool|null $headers = null): Client
+    private function createClient(bool|null $headers = null, WriteBufferService|null $writeBuffer = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
@@ -246,6 +316,7 @@ final class ClientIntegrationTest extends TestCase
             messageDispatcher: $messageDispatcher,
             storage: $storage,
             logger: $this->logger,
+            writeBuffer: $writeBuffer,
         );
     }
 }

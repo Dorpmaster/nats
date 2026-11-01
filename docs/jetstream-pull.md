@@ -31,13 +31,21 @@ foreach ($result->messages() as $message) {
 }
 ```
 
-Fetch request uses:
+Fetch subscribes to a unique inbox before publishing. Each call owns its completion
+state and local deadline, including concurrent calls on the same consumer. The
+subscription stays active until the batch or byte budget is fulfilled, the server
+finishes the request, an error occurs, or the local deadline expires. Cleanup
+cancels the timer and unsubscribes once; late callbacks cannot change the result.
+A cleanup failure cannot replace the original fetch error.
 
-- `batch`
-- `expires` (ms -> ns)
-- `no_wait`
-- optional `max_bytes`
-- optional `idle_heartbeat` (ms -> ns)
+Request parameters:
+
+- `batch`, `no_wait`, and optional `max_bytes` are sent in both modes.
+- With `noWait: false`, `expiresMs` is sent as `expires` in nanoseconds;
+  optional `idleHeartbeatMs` is sent as `idle_heartbeat` in nanoseconds.
+- With `noWait: true`, `expiresMs` is only a local response deadline.
+  Neither `expires` nor `idle_heartbeat` is sent, even if a heartbeat interval
+  was supplied. This avoids incompatible no-wait/expiry/heartbeat combinations.
 
 ## Message DTO + Ack API
 
@@ -106,8 +114,38 @@ Guard behavior:
 
 ## noWait / expires Semantics
 
-- `noWait=true` on empty consumer returns empty fetch result (`receivedCount=0`).
-- `expiresMs` bounds fetch duration; method returns collected messages on timeout.
+`no_wait` asks the server not to wait for new messages. The client still waits for
+responses to its request. Available messages are returned in delivery order, with
+the existing explicit ACK contract. An empty or partial batch returns as soon as
+the server confirms completion; it does not wait out `expiresMs`.
+
+For `noWait: true`, silence or partial data without confirmed completion raises
+`JetStreamTimeoutException` at the local deadline. A full batch or fulfilled
+`maxBytes` budget needs no additional terminal status. NATS counts subject, ACK
+reply, header block and payload bytes against that budget. Parsed HMSG frames
+retain their received body size through the optional `WireBodySizeMessageInterface`,
+so normalization of header whitespace does not change completion at an exact limit.
+
+For `noWait: false`, server expiry returns collected messages. The existing local
+fallback remains `expiresMs + 200 ms` and returns collected messages if the server
+has not sent a terminal response.
+
+### Protocol statuses
+
+The protocol parser exposes the first HMSG header line as optional `MessageStatus`
+through `StatusMessageInterface`; regular headers remain separate. Status-only
+frames with no ordinary headers or payload are supported. Existing HMSG
+constructor arguments and message interfaces remain compatible.
+
+- `100`: heartbeat; keep waiting and exclude it from the result.
+- `404` / `408`: normal completion (no messages / request expiry).
+- `409` with `Batch Completed` or `Message Size Exceeds MaxBytes`: normal completion.
+- Other statuses: `JetStreamApiException` preserving server code and description,
+  including `409 Consumer Deleted` and `503 No Responders`.
+
+Service frames never become application messages. Legacy JSON error responses
+remain supported; JSON `404` completes an empty/partial fetch and other JSON
+errors retain their code and description.
 
 ## Delivery Guarantees
 
