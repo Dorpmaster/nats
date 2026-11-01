@@ -19,6 +19,7 @@ use Dorpmaster\Nats\Client\WriteBufferService;
 use Dorpmaster\Nats\Connection\Connection;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
 use Dorpmaster\Nats\Domain\Connection\ConnectionException;
+use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneHeadersRequestMessage;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
@@ -31,6 +32,7 @@ use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
 use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
+use Dorpmaster\Nats\Tests\Support\HMsgHeaderCases;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -193,6 +195,54 @@ final class ClientIntegrationTest extends TestCase
         }
     }
 
+    public static function headerContentCases(): iterable
+    {
+        return HMsgHeaderCases::cases();
+    }
+
+    /** @param array<string, list<string>> $headers */
+    #[DataProvider('headerContentCases')]
+    public function testHeaderValuesWithNatsSurviveCoreRoundtripAndNextRequest(array $headers): void
+    {
+        $this->setTimeout(10);
+        $this->runAsyncTest(function () use ($headers): void {
+            $states = [];
+            $events = new EventDispatcher();
+            $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$states): void {
+                $states[] = $state;
+            });
+            $client   = $this->createClient(headers: true, events: $events);
+            $token    = bin2hex(random_bytes(6));
+            $subject  = 'it.hmsg.content.' . $token;
+            $probe    = 'it.hmsg.probe.' . $token;
+            $payload  = "binary\r\n\0PUB is payload\r\nend\0";
+            $received = new DeferredFuture();
+            try {
+                $client->connect();
+                $client->subscribe($subject, static function (NatsProtocolMessageInterface $message) use ($received): null {
+                    if (!$received->isComplete()) {
+                        $received->complete($message);
+                    }
+                    return null;
+                });
+                $client->subscribe($probe, static fn(NatsProtocolMessageInterface $message): PubMessage => new PubMessage((string) $message->getReplyTo(), 'ready'));
+                self::assertSame('ready', $client->request(new PubMessage($probe, 'before'), 2)->getPayload());
+                $client->publish(new HPubMessage($subject, $payload, new HeaderBag($headers)));
+                $message = $received->getFuture()->await(new TimeoutCancellation(2));
+                self::assertInstanceOf(HMsgMessageInterface::class, $message);
+                self::assertSame($headers, iterator_to_array($message->getHeaders()));
+                self::assertSame($payload, $message->getPayload());
+                self::assertNull($message->getStatus());
+                self::assertSame(strlen((string) new HeaderBag($headers)) + 4 + strlen($payload), $message->getWireBodySize());
+                self::assertSame('ready', $client->request(new PubMessage($probe, 'after'), 2)->getPayload());
+                self::assertNotContains(ClientState::RECONNECTING, $states);
+                self::assertSame(1, count(array_filter($states, static fn(ClientState $state): bool => $state === ClientState::CONNECTED)));
+            } finally {
+                $client->disconnect();
+            }
+        });
+    }
+
     public function testRequestReply(): void
     {
         $this->setTimeout(30);
@@ -293,7 +343,7 @@ final class ClientIntegrationTest extends TestCase
         });
     }
 
-    private function createClient(bool|null $headers = null, WriteBufferService|null $writeBuffer = null): Client
+    private function createClient(bool|null $headers = null, WriteBufferService|null $writeBuffer = null, EventDispatcher|null $events = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
@@ -302,7 +352,7 @@ final class ClientIntegrationTest extends TestCase
 
         $connection          = new Connection($connector, $config, $this->logger);
         $clientConfiguration = new ClientConfiguration();
-        $eventDispatcher     = new EventDispatcher();
+        $eventDispatcher     = $events ?? new EventDispatcher();
 
         $connectionInfo    = new ConnectInfo(false, false, false, 'php', PHP_VERSION, headers: $headers);
         $storage           = new SubscriptionStorage();

@@ -10,6 +10,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Preserve ordinary HMSG headers containing `NATS/`, URLs and multiple colons, including repeated values in their original order. Recognize only the first, valid `NATS/1.0` preamble as protocol metadata while retaining separate statuses and received body sizes.
+
 - Wait for asynchronous JetStream `fetch(noWait: true)` replies and server completion instead of removing the inbox immediately. Keep a separate local timeout, preserve HMSG status codes/descriptions (including status-only frames), handle heartbeat and byte-limit completion, and clean up each request independently on success or failure.
 
 - Keep Core and JetStream HPUB lengths consistent with mutable header bags, and send/retry the exact serialized frame captured at enqueue time so wire bytes and queue byte accounting remain aligned.

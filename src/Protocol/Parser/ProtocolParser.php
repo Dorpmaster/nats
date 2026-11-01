@@ -160,13 +160,14 @@ final readonly class ProtocolParser implements ProtocolParserInterface
 
     private static function parseHeaders(string $payload): HeaderBugInterface
     {
+        $lines    = explode(NatsProtocolMessageInterface::DELIMITER, $payload);
+        $preamble = array_shift($lines);
+        if ($preamble !== 'NATS/1.0' && MessageStatus::fromHeaderBlock($preamble) === null) {
+            throw new \RuntimeException('Malformed HMSG header preamble');
+        }
+
         $headers = new HeaderBag();
-
-        foreach (explode(NatsProtocolMessageInterface::DELIMITER, $payload) as $item) {
-            if (str_contains($item, 'NATS/') === true) {
-                continue;
-            }
-
+        foreach ($lines as $item) {
             $parts = explode(':', $item, 2);
             if (count($parts) !== 2) {
                 continue;
