@@ -6,6 +6,6 @@ trait IsSidCorrect
 {
     private function isSidCorrect(string $subject): bool
     {
-        return preg_match('/^[[:alnum:]]+$/', $subject) === 1;
+        return preg_match('/\A[[:alnum:]]+\z/', $subject) === 1;
     }
 }

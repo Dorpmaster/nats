@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Domain\JetStream\Admin;
 
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
+use Dorpmaster\Nats\Domain\JetStream\Internal\ResourceName;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerInfo;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
@@ -23,6 +24,8 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
 
     public function createStream(StreamConfig $config): StreamInfo
     {
+        ResourceName::validate($config->getName(), 'stream');
+
         $this->getLogger()->info('js.admin.stream.create', [
             'stream' => $config->getName(),
             'subjects' => count($config->getSubjects()),
@@ -53,6 +56,8 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
 
     public function getStreamInfo(string $stream): StreamInfo
     {
+        ResourceName::validate($stream, 'stream');
+
         $this->getLogger()->debug('js.admin.stream.info', [
             'stream' => $stream,
         ]);
@@ -76,6 +81,8 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
 
     public function deleteStream(string $stream): void
     {
+        ResourceName::validate($stream, 'stream');
+
         $this->getLogger()->info('js.admin.stream.delete', [
             'stream' => $stream,
         ]);
@@ -96,6 +103,9 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
 
     public function createOrUpdateConsumer(string $stream, ConsumerConfig $config): ConsumerInfo
     {
+        ResourceName::validate($stream, 'stream');
+        ResourceName::validate($config->getDurableName(), 'consumer');
+
         $this->getLogger()->info('js.admin.consumer.create', [
             'stream' => $stream,
             'consumer' => $config->getDurableName(),
@@ -130,6 +140,9 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
 
     public function getConsumerInfo(string $stream, string $consumer): ConsumerInfo
     {
+        ResourceName::validate($stream, 'stream');
+        ResourceName::validate($consumer, 'consumer');
+
         $this->getLogger()->debug('js.admin.consumer.info', [
             'stream' => $stream,
             'consumer' => $consumer,
@@ -155,6 +168,9 @@ final readonly class JetStreamAdmin implements JetStreamAdminInterface
 
     public function deleteConsumer(string $stream, string $consumer): void
     {
+        ResourceName::validate($stream, 'stream');
+        ResourceName::validate($consumer, 'consumer');
+
         $this->getLogger()->info('js.admin.consumer.delete', [
             'stream' => $stream,
             'consumer' => $consumer,

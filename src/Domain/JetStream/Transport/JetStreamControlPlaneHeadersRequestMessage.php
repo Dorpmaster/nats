@@ -7,10 +7,13 @@ namespace Dorpmaster\Nats\Domain\JetStream\Transport;
 use Dorpmaster\Nats\Protocol\Contracts\HeaderBugInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
+use Dorpmaster\Nats\Protocol\Internal\ValidatePublishTokens;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
 
 final readonly class JetStreamControlPlaneHeadersRequestMessage implements NatsProtocolMessageInterface, HPubMessageInterface
 {
+    use ValidatePublishTokens;
+
     private int $payloadSize;
     private int $headersSize;
     private int $totalSize;
@@ -21,6 +24,8 @@ final readonly class JetStreamControlPlaneHeadersRequestMessage implements NatsP
         private HeaderBugInterface $headers,
         private string|null $replyTo = null,
     ) {
+        $this->validatePublishTokens($this->subject, $this->replyTo);
+
         $this->payloadSize = strlen($this->payload);
         $this->headersSize = strlen((string) $this->headers) + 4;
         $this->totalSize   = $this->payloadSize + $this->headersSize;

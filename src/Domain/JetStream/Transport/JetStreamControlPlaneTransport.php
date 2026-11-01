@@ -9,6 +9,7 @@ use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Protocol\Header\HeaderBag;
+use Dorpmaster\Nats\Protocol\Internal\ValidatePublishTokens;
 use JsonException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -16,6 +17,8 @@ use stdClass;
 
 final readonly class JetStreamControlPlaneTransport implements JetStreamControlPlaneTransportInterface
 {
+    use ValidatePublishTokens;
+
     private const string API_PREFIX   = '$JS.API.';
     private const string REPLY_PREFIX = 'JSREPLY';
     private SubscriptionIdHelperInterface $subscriptionIdHelper;
@@ -42,6 +45,8 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamControlP
 
     public function request(string $apiSubjectSuffix, array $payload, int|null $timeoutMs = null): array
     {
+        $this->validatePublishTokens($apiSubjectSuffix);
+
         $subject = self::API_PREFIX . $apiSubjectSuffix;
         $body    = $payload === [] ? new stdClass() : $payload;
         $this->logger->debug('js.control.request', [
@@ -116,8 +121,11 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamControlP
         string $replyTo,
         array $headers = [],
     ): void {
+        $this->validatePublishTokens($apiSubjectSuffix);
+
         $subject = self::API_PREFIX . $apiSubjectSuffix;
         $body    = $payload === [] ? new stdClass() : $payload;
+        $this->validatePublishTokens($subject, $replyTo);
         $this->logger->debug('js.control.publish_request', [
             'subject' => $subject,
             'reply_to' => $replyTo,

@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.2.1] - Unreleased
+
+### Changed
+
+- Raised the minimum `amphp/byte-stream` version to `2.1.3` (`^2.1.3`, allowing `>=2.1.3 <3.0.0`) to prevent stalled TLS reads with non-select event-loop drivers and report an error when writing to a disconnected peer makes `fwrite()` return zero bytes. See the [AMPHP Byte Stream 2.1.3 release notes](https://github.com/amphp/byte-stream/releases/tag/v2.1.3).
+
+### Fixed
+
+- Preserve valid JetStream resource names such as `ORDERS@EU`, `ORDERS+EU`, and `WORKER@EU` by separating command-token safety checks from the existing Core publish subject rules.
+- Reject invalid JetStream stream and durable consumer names before API requests or pull inbox subscriptions. Validate outgoing PUB/HPUB subjects and reply-to fields, including direct transport frames, and reject trailing newlines in SUB/UNSUB command fields to prevent NATS command injection. Binary payloads and existing subscription patterns remain supported.
+
+### Notes
+
+- Applications locking `amphp/byte-stream` to `2.1.2` or earlier must update it together with the driver when upgrading to `1.2.1`.
+
 ## [1.2.0] - 2026-03-27
 
 ### Added

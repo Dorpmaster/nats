@@ -22,6 +22,8 @@ use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
+use Dorpmaster\Nats\Protocol\Header\HeaderBag;
+use Dorpmaster\Nats\Protocol\HPubMessage;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
@@ -94,6 +96,27 @@ final class ClientIntegrationTest extends TestCase
                 self::assertSame($subject, $message->getSubject());
                 self::assertSame($payload, $message->getPayload());
                 self::assertNull($message->getReplyTo());
+            } finally {
+                $client->disconnect();
+            }
+        });
+    }
+
+    public function testPublishAndHeaderPublishPreserveBinaryPayload(): void
+    {
+        $this->setTimeout(30);
+        $this->runAsyncTest(function (): void {
+            $client  = $this->createClient(headers: true);
+            $subject = 'it.binary.' . bin2hex(random_bytes(6));
+            $payload = "before\r\nPUB untouched 1\r\n\0after";
+
+            try {
+                $client->connect();
+                $client->subscribe($subject, static fn (NatsProtocolMessageInterface $message): PubMessage => new PubMessage((string) $message->getReplyTo(), $message->getPayload()));
+
+                foreach ([new PubMessage($subject, $payload), new HPubMessage($subject, $payload, new HeaderBag(['Test' => 'binary']))] as $message) {
+                    self::assertSame($payload, $client->request($message, 2)->getPayload());
+                }
             } finally {
                 $client->disconnect();
             }
@@ -200,7 +223,7 @@ final class ClientIntegrationTest extends TestCase
         });
     }
 
-    private function createClient(): Client
+    private function createClient(bool|null $headers = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
@@ -211,7 +234,7 @@ final class ClientIntegrationTest extends TestCase
         $clientConfiguration = new ClientConfiguration();
         $eventDispatcher     = new EventDispatcher();
 
-        $connectionInfo    = new ConnectInfo(false, false, false, 'php', PHP_VERSION);
+        $connectionInfo    = new ConnectInfo(false, false, false, 'php', PHP_VERSION, headers: $headers);
         $storage           = new SubscriptionStorage();
         $messageDispatcher = new MessageDispatcher($connectionInfo, $storage, $this->logger);
 

@@ -7,6 +7,7 @@ namespace Dorpmaster\Nats\Domain\JetStream\Pull;
 use Amp\DeferredFuture;
 use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
+use Dorpmaster\Nats\Domain\JetStream\Internal\ResourceName;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamClientAcknowledger;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAcker;
 use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageAckerInterface;
@@ -38,6 +39,9 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         JetStreamConsumeLoop|null $consumeLoop = null,
         LoggerInterface|null $logger = null,
     ) {
+        ResourceName::validate($this->stream, 'stream');
+        ResourceName::validate($this->consumer, 'consumer');
+
         $this->logger       = $logger ?? new NullLogger();
         $this->acknowledger = $acknowledger ?? new JetStreamClientAcknowledger($this->transport->getClient());
         $this->messageAcker = new LoggingJetStreamMessageAcker(

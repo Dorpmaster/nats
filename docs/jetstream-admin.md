@@ -37,6 +37,20 @@ $admin->deleteConsumer('ORDERS', 'C1');
 $admin->deleteStream('ORDERS');
 ```
 
+## Local Validation
+
+Stream and durable consumer names must be nonempty and contain no whitespace,
+control characters, `.`, `*`, `>`, `/`, or `\`. Names such as `ORDERS@EU`,
+`ORDERS+EU`, and `WORKER@EU`, as well as hyphens and underscores, are supported.
+Invalid names raise `InvalidArgumentException` identifying the field before an
+API request is sent.
+
+The transport and its PUB/HPUB frame constructors separately reject empty
+required command tokens, whitespace, and control characters in subjects and
+reply-to values. They preserve valid resource-name characters in compound
+JetStream addresses. Binary payloads are preserved byte for byte, and Core
+`PubMessage`/`HPubMessage` retain their existing subject rules.
+
 ## Error Handling
 
 `JetStreamControlPlaneTransport` throws `JetStreamApiException` when:

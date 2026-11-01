@@ -7,12 +7,12 @@ namespace Dorpmaster\Nats\Protocol;
 use Dorpmaster\Nats\Protocol\Contracts\HeaderBugInterface;
 use Dorpmaster\Nats\Protocol\Contracts\HPubMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
-use Dorpmaster\Nats\Protocol\Internal\IsSubjectCorrect;
+use Dorpmaster\Nats\Protocol\Internal\ValidatePublishSubjects;
 use InvalidArgumentException;
 
 final readonly class HPubMessage implements NatsProtocolMessageInterface, HPubMessageInterface
 {
-    use IsSubjectCorrect;
+    use ValidatePublishSubjects;
 
     private int $payloadSize;
     private int $headersSize;
@@ -28,13 +28,7 @@ final readonly class HPubMessage implements NatsProtocolMessageInterface, HPubMe
             throw new InvalidArgumentException('Headers must not be empty');
         }
 
-        if (!$this->isSubjectCorrect($this->subject)) {
-            throw new InvalidArgumentException(sprintf('Invalid Subject: %s', $this->subject));
-        }
-
-        if (($this->replyTo !== null) && !$this->isSubjectCorrect($this->replyTo)) {
-            throw new InvalidArgumentException(sprintf('Invalid Reply-To: %s', $this->replyTo));
-        }
+        $this->validatePublishSubjects($this->subject, $this->replyTo);
 
         $this->payloadSize = strlen($this->payload);
         // The size of the headers section in bytes including the ␍␊␍␊ delimiter before the payload.

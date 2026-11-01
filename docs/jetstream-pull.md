@@ -11,6 +11,11 @@ $admin->createStream(new StreamConfig('ORDERS', ['orders.*']));
 $admin->createOrUpdateConsumer('ORDERS', new ConsumerConfig('C1', filterSubject: 'orders.created'));
 ```
 
+The factory and direct `JetStreamPullConsumer` constructor apply the same
+[resource name validation](jetstream-admin.md#local-validation) as Admin.
+Invalid stream or durable consumer names raise `InvalidArgumentException`
+before an inbox subscription or pull request is created.
+
 ## Fetch
 
 ```php
