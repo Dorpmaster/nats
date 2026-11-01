@@ -11,6 +11,9 @@ use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamConfigurationUnconfirmedException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamTimeoutException;
 use Dorpmaster\Nats\Domain\JetStream\Internal\ResourceName;
+use Dorpmaster\Nats\Domain\JetStream\Internal\Decimal;
+use Dorpmaster\Nats\Domain\JetStream\Internal\MetadataFields;
+use Dorpmaster\Nats\Domain\JetStream\Internal\LegacyMetadataResponse;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerInfo;
 use Dorpmaster\Nats\Domain\JetStream\Model\JsonObject;
@@ -194,7 +197,7 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         ]);
 
         try {
-            $response = $this->transport->request(
+            $response = $this->streamRequest(
                 sprintf('CONSUMER.CREATE.%s.%s', $stream, $config->getDurableName()),
                 [
                     'stream_name' => $stream,
@@ -231,7 +234,7 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         ]);
 
         try {
-            $response = $this->transport->request(
+            $response = $this->streamRequest(
                 sprintf('CONSUMER.INFO.%s.%s', $stream, $consumer),
                 [],
             );
@@ -277,38 +280,27 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
     /** @param array<string, mixed>|JsonObject $response */
     private function mapStreamInfo(array|JsonObject $response): StreamInfo
     {
-        $configuration = $response instanceof JsonObject ? $response->getObject('config') : null;
-        if ($configuration !== null && $configuration->has('subjects')) {
-            $subjects = $configuration->get('subjects');
+        try {
+            $raw           = $response instanceof JsonObject ? $response : LegacyMetadataResponse::fromArray($response);
+            $configuration = (new MetadataFields($raw, 'stream'))->object('config');
+            if ($configuration === null) {
+                throw new JetStreamApiException(0, 'JetStream stream response does not contain config object');
+            }
+            $name = (new MetadataFields($configuration, 'config'))->text('name');
+            if ($name === null || $name === '') {
+                throw new JetStreamApiException(0, 'JetStream stream response does not contain valid stream name');
+            }
+            // This schema requires strings: never let JSON_BIGINT_AS_STRING disguise numeric elements.
+            $subjects = $configuration->has('subjects')
+                ? json_decode($configuration->getRawValue('subjects'), false, 512, JSON_THROW_ON_ERROR)
+                : [];
             if (!is_array($subjects) || !array_is_list($subjects) || array_filter($subjects, static fn (mixed $subject): bool => !is_string($subject)) !== []) {
                 throw new JetStreamApiException(0, 'JetStream stream response contains invalid subjects list');
             }
+            return new StreamInfo($name, $subjects, $configuration, $raw);
+        } catch (InvalidArgumentException | JsonException $error) {
+            throw new JetStreamApiException(0, 'Invalid JetStream stream metadata: ' . $error->getMessage(), $error);
         }
-        $response = $response instanceof JsonObject ? $response->toArray() : $response;
-        if (!isset($response['config']) || !is_array($response['config'])) {
-            throw new JetStreamApiException(0, 'JetStream stream response does not contain config object');
-        }
-
-        $config = $response['config'];
-        $name   = $config['name'] ?? null;
-
-        if (!is_string($name) || $name === '') {
-            throw new JetStreamApiException(0, 'JetStream stream response does not contain valid stream name');
-        }
-
-        $subjects = $config['subjects'] ?? [];
-        if (!is_array($subjects)) {
-            throw new JetStreamApiException(0, 'JetStream stream response contains invalid subjects list');
-        }
-
-        $normalizedSubjects = [];
-        foreach ($subjects as $subject) {
-            if (is_string($subject)) {
-                $normalizedSubjects[] = $subject;
-            }
-        }
-
-        return new StreamInfo($name, $normalizedSubjects, $configuration ?? JsonObject::fromArray($config));
     }
 
     /** @param array<string, mixed> $payload
@@ -344,34 +336,30 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         }
     }
 
-    /** @param array<string, mixed> $response */
-    private function mapConsumerInfo(array $response): ConsumerInfo
+    /** @param array<string, mixed>|JsonObject $response */
+    private function mapConsumerInfo(array|JsonObject $response): ConsumerInfo
     {
-        $durableName = null;
-
-        if (isset($response['config']) && is_array($response['config'])) {
-            $candidate = $response['config']['durable_name'] ?? null;
-            if (is_string($candidate) && $candidate !== '') {
-                $durableName = $candidate;
+        try {
+            $raw           = $response instanceof JsonObject ? $response : LegacyMetadataResponse::fromArray($response);
+            $fields        = new MetadataFields($raw, 'consumer');
+            $configuration = $fields->object('config');
+            $durableName   = (new MetadataFields($configuration ?? new JsonObject('{}'), 'config'))->text('durable_name');
+            if ($durableName === null || $durableName === '') {
+                $durableName = $fields->text('name');
             }
+            if ($durableName === null || $durableName === '') {
+                throw new JetStreamApiException(0, 'JetStream consumer response does not contain durable name');
+            }
+            return new ConsumerInfo(
+                $durableName,
+                Decimal::toInt($fields->decimal('num_pending')),
+                Decimal::toInt($fields->decimal('num_ack_pending', Decimal::INT64_MAX)),
+                $configuration,
+                $raw,
+            );
+        } catch (InvalidArgumentException | JsonException $error) {
+            throw new JetStreamApiException(0, 'Invalid JetStream consumer metadata: ' . $error->getMessage(), $error);
         }
-
-        if ($durableName === null && isset($response['name']) && is_string($response['name']) && $response['name'] !== '') {
-            $durableName = $response['name'];
-        }
-
-        if ($durableName === null) {
-            throw new JetStreamApiException(0, 'JetStream consumer response does not contain durable name');
-        }
-
-        $numPending    = isset($response['num_pending']) && is_numeric($response['num_pending'])
-            ? (int) $response['num_pending']
-            : null;
-        $numAckPending = isset($response['num_ack_pending']) && is_numeric($response['num_ack_pending'])
-            ? (int) $response['num_ack_pending']
-            : null;
-
-        return new ConsumerInfo($durableName, $numPending, $numAckPending);
     }
 
     private function getLogger(): LoggerInterface

@@ -7,6 +7,7 @@ namespace Dorpmaster\Nats\Tests\Unit\JetStream\Pull;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
 use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumer;
+use Dorpmaster\Nats\Domain\JetStream\Message\JetStreamMessageMetadataInterface;
 use Dorpmaster\Nats\Domain\JetStream\Pull\PullConsumeOptions;
 use Dorpmaster\Nats\Domain\JetStream\Pull\SlowConsumerPolicy;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInterface;
@@ -77,6 +78,10 @@ final class JetStreamDeliveryMetadataTest extends TestCase
             $result  = $this->consumer([self::message($reply, $header)], $sent)->fetch(1, 100, true);
             $message = iterator_to_array($result->messages())[0];
             self::assertSame(6, $message->getDeliveryCount());
+            self::assertInstanceOf(JetStreamMessageMetadataInterface::class, $message);
+            self::assertSame('6', $message->getMetadata()?->deliveryCount);
+            self::assertSame('10', $message->getMetadata()?->streamSequence);
+            self::assertSame('25', $message->getMetadata()?->consumerSequence);
             $result->getAcker()->ack($message);
             $result->getAcker()->nak($message);
             $result->getAcker()->term($message);
@@ -90,12 +95,14 @@ final class JetStreamDeliveryMetadataTest extends TestCase
         yield 'HMSG conflicting headers' => [true, false];
         yield 'MSG numeric tail' => [false, true];
         yield 'HMSG numeric tail' => [true, true];
+        yield 'legacy count with invalid full MSG metadata' => [false, false, true];
+        yield 'legacy count with invalid full HMSG metadata' => [true, false, true];
     }
 
     #[DataProvider('dropCases')]
-    public function testConsumeDropNewUsesFetchedMetadataAndOnlyTermsDroppedSix(bool $headers, bool $numericTail): void
+    public function testConsumeDropNewUsesFetchedMetadataAndOnlyTermsDroppedSix(bool $headers, bool $numericTail, bool $invalidFullMetadata = false): void
     {
-        $this->runAsyncTest(function () use ($headers, $numericTail): void {
+        $this->runAsyncTest(function () use ($headers, $numericTail, $invalidFullMetadata): void {
             $first = '$JS.ACK.ORDERS.C1.12.10.31.1700000000000000000.0';
             $five  = '$JS.ACK.ORDERS.C1.5.11.32.1700000000000000000.0';
             $six   = '$JS.ACK.ORDERS.C1.6.12.33.1700000000000000000.0';
@@ -104,6 +111,10 @@ final class JetStreamDeliveryMetadataTest extends TestCase
                 $first = '$JS.ACK.EU.hash.ORDERS.C1.6.10.25.1700000000000000000.0.7';
                 $five  = '$JS.ACK.EU.hash.ORDERS.C1.5.11.32.1700000000000000000.0.7';
                 $six   = '$JS.ACK.EU.hash.ORDERS.C1.6.12.33.1700000000000000000.0.7';
+            }
+            if ($invalidFullMetadata) {
+                $first = str_replace('.10.', '.0.', $first);
+                $six   = str_replace('.12.', '.0.', $six);
             }
             $invalid  = 'OTHER.ACK.ORDERS.C1.9.13.34.1700000000000000000.0';
             $sent     = [];
@@ -127,6 +138,13 @@ final class JetStreamDeliveryMetadataTest extends TestCase
                 $accepted = $handle->next(1000);
                 self::assertNotNull($accepted);
                 self::assertSame($numericTail ? 6 : 12, $accepted->getDeliveryCount());
+                self::assertInstanceOf(JetStreamMessageMetadataInterface::class, $accepted);
+                if ($invalidFullMetadata) {
+                    self::assertNull($accepted->getMetadata());
+                } else {
+                    self::assertSame($numericTail ? '6' : '12', $accepted->getMetadata()?->deliveryCount);
+                    self::assertSame('10', $accepted->getMetadata()?->streamSequence);
+                }
                 self::assertSame([], $sent);
                 self::assertSame($first, $accepted->getReplyTo());
                 self::assertNull($handle->next(1000));

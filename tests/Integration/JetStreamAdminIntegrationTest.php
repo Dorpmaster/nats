@@ -19,6 +19,9 @@ use Dorpmaster\Nats\Domain\JetStream\Admin\JetStreamAdmin;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
+use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfigPatch;
+use Dorpmaster\Nats\Domain\JetStream\Model\JsonObject;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamSingleAttemptTransportInterface;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
@@ -182,6 +185,69 @@ final class JetStreamAdminIntegrationTest extends TestCase
                 }
             } finally {
                 $observer->disconnect();
+                $client->disconnect();
+            }
+        }
+    }
+
+    public static function invalidInfoSubjects(): iterable
+    {
+        yield 'null' => ['null'];
+        yield 'unquoted big integer' => ['[9223372036854775808]'];
+        yield 'mixed list with unquoted UInt64' => ['["orders.*",18446744073709551615]'];
+    }
+
+    #[DataProvider('invalidInfoSubjects')]
+    public function testUpdateRejectsInvalidSubjectsAndKeepsRealStreamRouting(string $subjectsJson): void
+    {
+        self::requireJetStreamMode();
+        $client = $this->createClient();
+        $client->connect();
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $stream    = 'N2_ADMIN_' . bin2hex(random_bytes(5));
+        $subjects  = ['orders.*'];
+        $updates   = [];
+        $created   = false;
+        try {
+            $before     = $admin->createStream(new StreamConfig($stream, $subjects, 'memory'));
+            $created    = true;
+            $connection = $client->getServerInformation();
+            $guarded    = $this->createMock(JetStreamSingleAttemptTransportInterface::class);
+            $guarded->expects(self::once())->method('requestJson')->willReturnCallback(static function (string $suffix, JsonObject $payload, int|null $timeoutMs) use ($transport, $subjectsJson): JsonObject {
+                $info          = $transport->requestJson($suffix, $payload, $timeoutMs);
+                $configuration = $info->getObject('config')->withFields(['subjects' => null])->toJson();
+                // Inject original JSON tokens: PHP numeric conversion would hide this regression.
+                $configuration = str_replace('"subjects":null', '"subjects":' . $subjectsJson, $configuration);
+                return new JsonObject('{"config":' . $configuration . '}');
+            });
+            $guarded->method('requestJsonOnce')->willReturnCallback(static function (string $suffix, JsonObject $payload, int|null $timeoutMs) use ($transport, &$updates): JsonObject {
+                $updates[] = $payload->toJson();
+                return $transport->requestJsonOnce($suffix, $payload, $timeoutMs);
+            });
+            try {
+                (new JetStreamAdmin($guarded))->updateStream($stream, new StreamConfigPatch(maxConsumers: 7));
+                self::fail('Invalid INFO must fail before a modifying request');
+            } catch (JetStreamApiException $error) {
+                self::assertStringContainsString('subjects', $error->getMessage());
+            }
+            self::assertSame([], $updates, 'Zero UPDATE requests may reach the real transport');
+            $after = $admin->getStreamInfo($stream);
+            self::assertSame($subjects, $after->getSubjects());
+            self::assertSame($before->getConfiguration()->get('max_consumers'), $after->getConfiguration()->get('max_consumers'));
+
+            // A normal update and a following INFO still work through the same connection.
+            $updated = $admin->updateStream($stream, new StreamConfigPatch(maxConsumers: 7));
+            self::assertSame(7, $updated->getConfiguration()->get('max_consumers'));
+            self::assertSame($subjects, $admin->getStreamInfo($stream)->getSubjects());
+            self::assertSame($connection->connectionId, $client->getServerInformation()->connectionId);
+            self::assertSame($connection->serverId, $client->getServerInformation()->serverId);
+        } finally {
+            try {
+                if ($created) {
+                    $admin->deleteStream($stream);
+                }
+            } finally {
                 $client->disconnect();
             }
         }

@@ -235,9 +235,11 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
         $payload = $message->getPayload();
         $replyTo = $message->getReplyTo();
 
-        $headers = [];
+        $headers      = [];
+        $headerValues = [];
         if ($message instanceof HMsgMessageInterface) {
             foreach ($message->getHeaders() as $name => $values) {
+                $headerValues[$name] = is_array($values) ? array_values($values) : [(string) $values];
                 if (is_array($values)) {
                     $headers[$name] = (string) reset($values);
                 } else {
@@ -255,6 +257,7 @@ final class JetStreamPullConsumer implements JetStreamPullConsumerInterface
             replyTo: $replyTo,
             sizeBytes: $this->calculateMessageSizeBytes($payload, $headers),
             deliveryCount: $deliveryCount,
+            headerValues: $headerValues,
         );
     }
 

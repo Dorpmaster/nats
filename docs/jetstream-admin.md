@@ -182,3 +182,18 @@ in-flight attempt is accounted until the write settles; neither timeout nor fail
 is evidence that the server did not apply UPDATE. Inspect the stream before making
 an explicit retry decision. Cleanup UNSUB frames may still wait behind a paused
 writer, but the expired UPDATE and its unsent SUB are withdrawn immediately.
+
+## Metadata snapshots
+
+Stream and consumer results expose immutable [typed metadata](jetstream-metadata.md),
+complete exact JSON responses/configurations, nanosecond timestamps and separate
+current/desired cluster models. This adds no queries to the existing operation
+and does not alter the single-attempt UPDATE lifetime.
+
+When mapping `StreamInfo`, an explicitly present `config.subjects` must be a JSON
+array of JSON strings. Numeric elements are invalid even beyond PHP int; a quoted
+numeric string remains a string. Both INFO and UPDATE raise `JetStreamApiException`
+identifying `subjects` for an invalid field or element. INFO is read before this
+validation, and no modifying request is invoked on failure. `null` is invalid.
+An absent field is retained as absent (including mirror/source configurations);
+an explicit empty list is valid and remains `[]`.

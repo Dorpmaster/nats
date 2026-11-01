@@ -4,10 +4,59 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Domain\JetStream\Internal;
 
+use Dorpmaster\Nats\Domain\JetStream\Message\MessageMetadata;
+use Dorpmaster\Nats\Domain\JetStream\Model\NanoTimestamp;
+use InvalidArgumentException;
+
 /** @internal */
 final class AckSubjectMetadata
 {
+    public static function parse(string|null $replyTo): MessageMetadata|null
+    {
+        $tokens = self::tokens($replyTo);
+        if ($tokens === null) {
+            return null;
+        }
+        $position = count($tokens) === 9 ? 4 : 6;
+        try {
+            return new MessageMetadata(
+                stream: $tokens[$position - 2],
+                consumer: $tokens[$position - 1],
+                streamSequence: $tokens[$position + 1],
+                consumerSequence: $tokens[$position + 2],
+                deliveryCount: $tokens[$position],
+                pending: $tokens[$position + 4],
+                timestamp: NanoTimestamp::fromUnixNanoseconds($tokens[$position + 3]),
+                domain: $position === 4 ? null : ($tokens[2] === '_' ? '' : $tokens[2]),
+                accountHash: $position === 4 ? null : $tokens[3],
+            );
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+    }
+
     public static function deliveryCount(string|null $replyTo): int|null
+    {
+        $tokens = self::tokens($replyTo);
+        if ($tokens === null) {
+            return null;
+        }
+        $countPosition = count($tokens) === 9 ? 4 : 6;
+
+        $digits  = ltrim($tokens[$countPosition], '0');
+        $maximum = (string) PHP_INT_MAX;
+        if (
+            $digits === '' || strlen($digits) > strlen($maximum)
+            || (strlen($digits) === strlen($maximum) && strcmp($digits, $maximum) > 0)
+        ) {
+            return null;
+        }
+
+        return (int) $digits;
+    }
+
+    /** @return list<string>|null */
+    private static function tokens(string|null $replyTo): array|null
     {
         if ($replyTo === null || $replyTo === '') {
             return null;
@@ -38,15 +87,6 @@ final class AckSubjectMetadata
             }
         }
 
-        $digits  = ltrim($tokens[$countPosition], '0');
-        $maximum = (string) PHP_INT_MAX;
-        if (
-            $digits === '' || strlen($digits) > strlen($maximum)
-            || (strlen($digits) === strlen($maximum) && strcmp($digits, $maximum) > 0)
-        ) {
-            return null;
-        }
-
-        return (int) $digits;
+        return $tokens;
     }
 }

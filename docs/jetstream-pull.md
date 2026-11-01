@@ -58,6 +58,10 @@ Ack actions are executed by `JetStreamMessageAckerInterface`:
 - `term($message)` -> `+TERM`
 - `inProgress($message)` -> `+WPI`
 
+See [exact message and Admin metadata](jetstream-metadata.md) for optional
+`getMetadata()` and full repeated-header snapshots, numeric ranges and nanosecond
+time conversion. Existing getters and ACK/NAK/TERM behavior are unchanged.
+
 ## Continuous Consume Loop
 
 `consume()` runs repeated pull-fetches and exposes a handle-driven API:

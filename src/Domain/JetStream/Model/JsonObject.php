@@ -40,6 +40,12 @@ final readonly class JsonObject
         return array_key_exists($field, $this->members());
     }
 
+    /** The original JSON value token, without decoding or numeric conversion. */
+    public function getRawValue(string $field): string|null
+    {
+        return $this->members()[$field] ?? null;
+    }
+
     public function get(string $field): mixed
     {
         $raw = $this->members()[$field] ?? null;

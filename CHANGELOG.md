@@ -6,9 +6,13 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Add optional JetStream ACK metadata and complete repeated-header views for fetch/consume, exact decimal counters and nanosecond timestamps, immutable stream/consumer state and raw configuration/response snapshots, and separate current/desired cluster and peer models. Preserve legacy getters, acknowledgement subjects, DROP_NEW and single-attempt UPDATE behavior.
+
 - Add optional JetStream server capability contracts based on current-transport INFO `api_lvl`, configurable API prefixes, server `err_code` access, nullable atomic/batched publishing and consumer-limit stream options, and selected-field stream UPDATE with exact JSON configuration preservation and one operation deadline. Existing interfaces, constructors and dependency floors remain compatible.
 
 ### Fixed
+
+- Validate JSON string types for every stream subject and reject null before UPDATE, restore known object shapes for legacy array-only Admin transports, and validate textual metadata against raw JSON token types, including integers beyond PHP int.
 
 - Stream UPDATE requests use a cancellable single-attempt queue lifetime: uncertain writes are never replayed after reconnect, and expired or cancelled unsent frames are withdrawn. Ordinary publication replay is unchanged.
 
