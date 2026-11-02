@@ -7,23 +7,28 @@ namespace Dorpmaster\Nats\Client;
 use Amp\CancelledException;
 use Amp\DeferredCancellation;
 use Amp\DeferredFuture;
-use Amp\Pipeline\ConcurrentIterator;
-use Amp\Pipeline\Queue;
 use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Client\WriteBuffer\OutboundFrame;
-use Dorpmaster\Nats\Domain\Client\WriteBufferInterface;
+use Dorpmaster\Nats\Client\WriteBuffer\FrameQueue;
+use Dorpmaster\Nats\Domain\Client\SingleAttemptWriteBufferInterface;
+use Dorpmaster\Nats\Domain\Client\RequestWriteException;
+use Dorpmaster\Nats\Domain\Connection\ConnectionException;
+use SplObjectStorage;
 use Dorpmaster\Nats\Domain\Client\WriteBufferOverflowException;
 use Dorpmaster\Nats\Domain\Connection\ConnectionInterface;
 use Dorpmaster\Nats\Domain\Telemetry\MetricsCollectorInterface;
 use Dorpmaster\Nats\Domain\Telemetry\NullMetricsCollector;
+use Dorpmaster\Nats\Telemetry\ProtocolLogContext;
 use Psr\Log\LoggerInterface;
 use Revolt\EventLoop;
 
-final class WriteBufferService implements WriteBufferInterface
+final class WriteBufferService implements SingleAttemptWriteBufferInterface
 {
-    private Queue $queue;
-    /** @var ConcurrentIterator<OutboundFrame> */
-    private ConcurrentIterator $iterator;
+    private FrameQueue $queue;
+    /** @var SplObjectStorage<OutboundFrame, int> Number of enqueues of the same snapshot. */
+    private SplObjectStorage $accounted;
+    private OutboundFrame|null $inFlight         = null;
+    private int $writerEpoch                     = 0;
     private ConnectionInterface|null $connection = null;
     private DeferredCancellation $loopCancellation;
     private bool $writerRunning                  = false;
@@ -52,6 +57,7 @@ final class WriteBufferService implements WriteBufferInterface
 
     public function start(ConnectionInterface $connection): void
     {
+        $this->writerEpoch++;
         $this->connection = $connection;
 
         if ($this->writerRunning) {
@@ -66,6 +72,7 @@ final class WriteBufferService implements WriteBufferInterface
 
     public function pause(): void
     {
+        $this->writerEpoch++;
         $this->paused = true;
         $this->loopCancellation->cancel();
     }
@@ -76,6 +83,7 @@ final class WriteBufferService implements WriteBufferInterface
             return;
         }
 
+        $this->writerEpoch++;
         $this->paused           = false;
         $this->loopCancellation = new DeferredCancellation();
         $this->scheduleWriter();
@@ -83,6 +91,7 @@ final class WriteBufferService implements WriteBufferInterface
 
     public function detach(): void
     {
+        $this->writerEpoch++;
         $this->connection = null;
         $this->loopCancellation->cancel();
     }
@@ -90,6 +99,10 @@ final class WriteBufferService implements WriteBufferInterface
     public function stop(): void
     {
         $this->detach();
+        $frames = iterator_to_array($this->accounted, false);
+        foreach ($frames as $frame) {
+            $frame->request?->fail(new ConnectionException('Write buffer stopped before request completion'));
+        }
         $this->paused          = false;
         $this->failedFrame     = null;
         $this->pendingMessages = 0;
@@ -121,7 +134,7 @@ final class WriteBufferService implements WriteBufferInterface
             $this->deferredDrained->getFuture()->await(new TimeoutCancellation($timeout));
         } catch (\Throwable $exception) {
             $this->logger?->warning('Write buffer drain timeout', [
-                'exception' => $exception,
+                ...ProtocolLogContext::exception($exception),
                 'pending_messages' => $this->pendingMessages,
                 'pending_bytes' => $this->pendingBytes,
             ]);
@@ -156,9 +169,16 @@ final class WriteBufferService implements WriteBufferInterface
             ));
         }
 
-        $this->queue->push($frame);
+        $this->accounted[$frame] = ($this->accounted[$frame] ?? 0) + 1;
         $this->pendingMessages++;
         $this->pendingBytes += $frame->bytes;
+        $this->queue->push($frame);
+        $frame->request?->onInactive(function () use ($frame): void {
+            if ($this->inFlight !== $frame) {
+                $this->queue->remove($frame);
+                $this->releaseFrame($frame);
+            }
+        });
         $this->scheduleWriter();
 
         return true;
@@ -191,11 +211,15 @@ final class WriteBufferService implements WriteBufferInterface
         }
 
         $this->writerRunning = true;
-        EventLoop::queue(function (): void {
+        $epoch               = $this->writerEpoch;
+        EventLoop::queue(function () use ($epoch): void {
             try {
                 $this->writerLoop();
             } finally {
                 $this->writerRunning = false;
+                if ($epoch !== $this->writerEpoch && !$this->paused && $this->connection !== null && !$this->connection->isClosed()) {
+                    $this->scheduleWriter();
+                }
             }
         });
     }
@@ -215,11 +239,11 @@ final class WriteBufferService implements WriteBufferInterface
                 }
 
                 try {
-                    $iterator = $this->iterator;
-                    if (!$iterator->continue($this->loopCancellation->getCancellation())) {
+                    $queue = $this->queue;
+                    $frame = $queue->pop($this->loopCancellation->getCancellation());
+                    if ($frame === null) {
                         return;
                     }
-                    $frame = $iterator->getValue();
                 } catch (CancelledException) {
                     return;
                 }
@@ -232,20 +256,47 @@ final class WriteBufferService implements WriteBufferInterface
                 return;
             }
 
+            if ($frame->request !== null && !$frame->request->beginAttempt()) {
+                $this->releaseFrame($frame);
+                continue;
+            }
+            $this->inFlight = $frame;
             try {
-                $connection->send($frame->message);
+                $connection->send($frame);
             } catch (\Throwable $exception) {
-                $this->failedFrame = $frame;
+                $this->inFlight = null;
+                if ($frame->request === null) {
+                    $this->failedFrame = $frame;
+                } else {
+                    $this->releaseFrame($frame);
+                    $frame->request->fail(new RequestWriteException($exception));
+                }
                 ($this->failureHandler)?->__invoke($exception);
-
                 return;
             }
-
-            $this->failedFrame     = null;
-            $this->pendingMessages = max(0, $this->pendingMessages - 1);
-            $this->pendingBytes    = max(0, $this->pendingBytes - $frame->bytes);
-            $this->completeDrainIfNeeded();
+            $this->inFlight = null;
+            $this->releaseFrame($frame);
+            $frame->request?->notifyWritten();
         }
+    }
+
+    private function releaseFrame(OutboundFrame $frame): void
+    {
+        if ($this->failedFrame === $frame) {
+            $this->failedFrame = null;
+        }
+        $count = $this->accounted[$frame] ?? 0;
+        if ($count === 0) {
+            return;
+        }
+        if ($count === 1) {
+            unset($this->accounted[$frame]);
+        } else {
+            $this->accounted[$frame] = $count - 1;
+        }
+        $this->pendingMessages = max(0, $this->pendingMessages - 1);
+        $this->pendingBytes    = max(0, $this->pendingBytes - $frame->bytes);
+        $this->completeDrainIfNeeded();
     }
 
     private function completeDrainIfNeeded(): void
@@ -264,8 +315,8 @@ final class WriteBufferService implements WriteBufferInterface
 
     private function initializeQueue(): void
     {
-        $this->queue            = new Queue($this->maxMessages);
-        $this->iterator         = $this->queue->iterate();
+        $this->queue            = new FrameQueue();
+        $this->accounted        = new SplObjectStorage();
         $this->loopCancellation = new DeferredCancellation();
     }
 

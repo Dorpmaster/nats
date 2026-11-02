@@ -165,15 +165,16 @@ phpunit: build
 	docker run --rm --interactive \
 		nats-client composer phpunit
 
+# Keep test recipes in one shell explicitly: macOS Make 3.81 ignores .ONESHELL.
 .PHONY: integration
 integration: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_NETWORK); \
-	fi
-	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_NETWORK) \
@@ -186,13 +187,13 @@ integration: build
 
 .PHONY: test
 test: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_NETWORK); \
-	fi
-	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_COMPOSE_FILE) --project-name $(NATS_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_NETWORK) \
@@ -205,13 +206,13 @@ test: build
 
 .PHONY: integration-tls
 integration-tls: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_TLS_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_TLS_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_TLS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_TLS_NETWORK); \
-	fi
-	docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_TLS_COMPOSE_FILE) --project-name $(NATS_TLS_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_TLS_NETWORK) \
@@ -225,13 +226,13 @@ integration-tls: build
 
 .PHONY: integration-jetstream
 integration-jetstream: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_JS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_JS_NETWORK); \
-	fi
-	docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_JS_COMPOSE_FILE) --project-name $(NATS_JS_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_JS_NETWORK) \
@@ -245,13 +246,13 @@ integration-jetstream: build
 
 .PHONY: integration-cluster
 integration-cluster: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_CLUSTER_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_CLUSTER_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_CLUSTER_NETWORK); \
-	fi
-	docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_CLUSTER_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_CLUSTER_NETWORK) \
@@ -267,13 +268,13 @@ integration-cluster: build
 
 .PHONY: integration-cluster-tls
 integration-cluster-tls: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_CLUSTER_TLS_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_CLUSTER_TLS_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_CLUSTER_TLS_NETWORK); \
-	fi
-	docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_CLUSTER_TLS_NETWORK) \
@@ -344,13 +345,13 @@ js-cluster-tls-down:
 
 .PHONY: integration-jetstream-cluster
 integration-jetstream-cluster: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_CLUSTER_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_CLUSTER_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_CLUSTER_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_CLUSTER_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_JS_CLUSTER_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_JS_CLUSTER_NETWORK); \
-	fi
-	docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_JS_CLUSTER_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_JS_CLUSTER_NETWORK) \
@@ -366,13 +367,13 @@ integration-jetstream-cluster: build
 
 .PHONY: integration-jetstream-cluster-tls
 integration-jetstream-cluster-tls: build
-	set -e
-	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi
-	trap 'docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_CLUSTER_TLS_NETWORK) || true; fi' EXIT
+	set -e; \
+	if [ -z "$(DOCKER_SOCKET_HOST)" ]; then echo "Docker socket not found"; exit 1; fi; \
+	trap 'docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) down --timeout=0 --volumes --remove-orphans; if docker network inspect $(NATS_JS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then docker network rm $(NATS_JS_CLUSTER_TLS_NETWORK) || true; fi' EXIT; \
 	if ! docker network inspect $(NATS_JS_CLUSTER_TLS_NETWORK) >/dev/null 2>&1; then \
 		docker network create $(NATS_JS_CLUSTER_TLS_NETWORK); \
-	fi
-	docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans
+	fi; \
+	docker compose -f $(NATS_JS_CLUSTER_TLS_COMPOSE_FILE) --project-name $(NATS_JS_CLUSTER_TLS_PROJECT) up -d --wait --remove-orphans; \
 	docker run --rm --interactive \
 		--user root \
 		--network=$(NATS_JS_CLUSTER_TLS_NETWORK) \
@@ -389,3 +390,47 @@ integration-jetstream-cluster-tls: build
 		--env NATS_DOCKER_SOCKET=/var/run/docker.sock \
 		--volume $(DOCKER_SOCKET_HOST):/var/run/docker.sock \
 		nats-client composer integration:jetstream:cluster:tls
+
+.PHONY: integration-tls-self-signed
+integration-tls-self-signed: build
+	python3 tests/Support/tls/run-self-signed.py
+
+.PHONY: integration-jetstream-compatibility
+integration-jetstream-compatibility: build
+	python3 tests/Support/run-jetstream-compatibility.py
+
+.PHONY: integration-jetstream-metadata
+integration-jetstream-metadata: build
+	python3 tests/Support/run-jetstream-metadata.py
+
+.PHONY: integration-jetstream-metadata-cluster
+integration-jetstream-metadata-cluster: build
+	python3 tests/Support/run-jetstream-metadata.py --cluster
+
+.PHONY: integration-jetstream-reset
+integration-jetstream-reset: build
+	python3 tests/Support/run-jetstream-reset.py
+
+.PHONY: integration-jetstream-reset-cluster
+integration-jetstream-reset-cluster: build
+	python3 tests/Support/run-jetstream-reset.py --cluster
+
+.PHONY: integration-jetstream-atomic
+integration-jetstream-atomic: build
+	python3 tests/Support/run-jetstream-atomic.py
+
+.PHONY: integration-jetstream-atomic-cluster
+integration-jetstream-atomic-cluster: build
+	python3 tests/Support/run-jetstream-atomic.py --cluster
+
+.PHONY: integration-jetstream-atomic-routes
+integration-jetstream-atomic-routes: build
+	python3 tests/Support/run-jetstream-atomic-routes.py --image nats-client
+
+.PHONY: integration-jetstream-fast
+integration-jetstream-fast: build
+	python3 tests/Support/run-jetstream-fast.py
+
+.PHONY: integration-jetstream-fast-cluster
+integration-jetstream-fast-cluster: build
+	python3 tests/Support/run-jetstream-fast.py --cluster

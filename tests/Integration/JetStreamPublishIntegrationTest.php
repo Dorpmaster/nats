@@ -19,7 +19,9 @@ use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
 use Dorpmaster\Nats\Domain\JetStream\Publish\JetStreamPublisher;
 use Dorpmaster\Nats\Domain\JetStream\Publish\PublishOptions;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneHeadersRequestMessage;
 use Dorpmaster\Nats\Event\EventDispatcher;
+use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
 use PHPUnit\Framework\TestCase;
@@ -104,6 +106,37 @@ final class JetStreamPublishIntegrationTest extends TestCase
         } finally {
             $admin->deleteStream($stream);
             $client->disconnect();
+        }
+    }
+
+    public function testMutableControlPlaneHeadersKeepApiConnectionUsable(): void
+    {
+        self::requireJetStreamMode();
+        $client  = $this->createClient();
+        $admin   = new JetStreamAdmin(new JetStreamControlPlaneTransport($client));
+        $token   = strtoupper(bin2hex(random_bytes(6)));
+        $stream  = 'HPUB_' . $token;
+        $created = false;
+        try {
+            $client->connect();
+            $admin->createStream(new StreamConfig($stream, ['it.hpub.api.' . $token]));
+            $created = true;
+            $headers = new HeaderBag(['X' => 'a']);
+            $message = new JetStreamControlPlaneHeadersRequestMessage('$JS.API.STREAM.INFO.' . $stream, '{}', $headers, 'HPUBREPLY' . $token);
+            $headers->set('X', 'abcdefgh');
+            self::assertSame(25, $message->getHeadersSize());
+            self::assertSame(27, $message->getTotalSize());
+            $response = json_decode($client->request($message, 2)->getPayload(), true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame($stream, $response['config']['name']);
+            self::assertSame($stream, $admin->getStreamInfo($stream)->getName());
+        } finally {
+            try {
+                if ($created) {
+                    $admin->deleteStream($stream);
+                }
+            } finally {
+                $client->disconnect();
+            }
         }
     }
 

@@ -6,10 +6,13 @@ namespace Dorpmaster\Nats\Domain\JetStream\Transport;
 
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
+use Dorpmaster\Nats\Protocol\Internal\ValidatePublishTokens;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
 
 final readonly class JetStreamControlPlaneRequestMessage implements NatsProtocolMessageInterface, PubMessageInterface
 {
+    use ValidatePublishTokens;
+
     private int $payloadSize;
 
     public function __construct(
@@ -17,6 +20,8 @@ final readonly class JetStreamControlPlaneRequestMessage implements NatsProtocol
         private string $payload,
         private string $replyTo,
     ) {
+        $this->validatePublishTokens($this->subject, $this->replyTo);
+
         $this->payloadSize = strlen($payload);
     }
 

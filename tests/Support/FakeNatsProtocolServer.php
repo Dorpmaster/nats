@@ -99,6 +99,12 @@ final class FakeNatsProtocolServer
         return $this->sessions[$sessionIndex]->rawCommands ?? [];
     }
 
+    /** @return list<array{command: string, payload: string}> */
+    public function publications(int $sessionIndex): array
+    {
+        return $this->sessions[$sessionIndex]->publications ?? [];
+    }
+
     public function authorizationViolationSent(int $sessionIndex): bool
     {
         return $this->sessions[$sessionIndex]->authorizationViolationSent ?? false;
@@ -127,10 +133,41 @@ final class FakeNatsProtocolServer
         $session->ready    = true;
     }
 
+    /** @param array<string, mixed> $options */
+    public function sendInfo(int $sessionIndex, array $options = []): void
+    {
+        $payload = array_replace(json_decode(self::INFO_PAYLOAD, true, 512, JSON_THROW_ON_ERROR), $options);
+        $this->sessions[$sessionIndex]->socket->write('INFO ' . json_encode($payload, JSON_THROW_ON_ERROR) . "\r\n");
+    }
+
+    public function sendPing(int $sessionIndex): void
+    {
+        $this->sessions[$sessionIndex]->socket->write("PING\r\n");
+    }
+
+    public function awaitCommandNameCount(int $sessionIndex, string $name, int $count, float $timeoutSeconds = 1.0): void
+    {
+        $this->await(
+            fn(array $sessions): bool => count(array_filter($this->commandNames($sessionIndex), static fn(string $command): bool => $command === $name)) >= $count,
+            $timeoutSeconds,
+            sprintf('Expected %d %s commands on session %d', $count, $name, $sessionIndex),
+        );
+    }
+
     public function closeSession(int $sessionIndex): void
     {
         $session = $this->sessions[$sessionIndex] ?? null;
         $session?->socket->close();
+    }
+
+    public function rejectAuthorization(int $sessionIndex, string $description): void
+    {
+        $session = $this->sessions[$sessionIndex] ?? null;
+        if ($session === null) {
+            throw new \RuntimeException('Session does not exist');
+        }
+        $session->socket->write("-ERR 'Authorization Violation " . $description . "'\r\n");
+        $session->socket->close();
     }
 
     public function replyToLatestRequest(int $sessionIndex, string $payload = 'response'): void
@@ -145,6 +182,11 @@ final class FakeNatsProtocolServer
             $session->latestInboxSid,
             $payload,
         ));
+    }
+
+    public function sendMessage(int $sessionIndex, string $subject, string $sid, string $payload): void
+    {
+        $this->sessions[$sessionIndex]->socket->write((string) new MsgMessage($subject, $sid, $payload));
     }
 
     private function handleClient(FakeNatsSessionState $session): void
@@ -170,7 +212,8 @@ final class FakeNatsProtocolServer
                             throw new \RuntimeException('Malformed client payload delimiter');
                         }
 
-                        $buffer = (string) substr($buffer, $pendingPayloadBytes + 2);
+                        $buffer                  = (string) substr($buffer, $pendingPayloadBytes + 2);
+                        $session->publications[] = ['command' => (string) $pendingCommandLine, 'payload' => $payload];
                         $this->recordCommand($session, (string) $pendingCommandName, (string) $pendingCommandLine);
                         $this->handleApplicationCommand($session, (string) $pendingCommandName, (string) $pendingCommandLine, $payload);
 
@@ -215,6 +258,9 @@ final class FakeNatsProtocolServer
 
                     if ($commandName === 'PING') {
                         $session->pingReceived = true;
+                        if ($session->ready) {
+                            $session->socket->write("PONG\r\n");
+                        }
 
                         continue;
                     }

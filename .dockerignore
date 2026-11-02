@@ -1,0 +1,8 @@
+# Install dependencies inside the image; never overlay them with host packages.
+vendor/
+
+.git/
+.idea/
+.phpunit.cache/
+.phpunit.result.cache
+phpunit.coverage/

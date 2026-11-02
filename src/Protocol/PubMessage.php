@@ -6,12 +6,11 @@ namespace Dorpmaster\Nats\Protocol;
 
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\PubMessageInterface;
-use Dorpmaster\Nats\Protocol\Internal\IsSubjectCorrect;
-use InvalidArgumentException;
+use Dorpmaster\Nats\Protocol\Internal\ValidatePublishSubjects;
 
 final readonly class PubMessage implements NatsProtocolMessageInterface, PubMessageInterface
 {
-    use IsSubjectCorrect;
+    use ValidatePublishSubjects;
 
     private int $payloadSize;
 
@@ -22,13 +21,7 @@ final readonly class PubMessage implements NatsProtocolMessageInterface, PubMess
     ) {
         $this->payloadSize = strlen($this->payload);
 
-        if (!$this->isSubjectCorrect($this->subject)) {
-            throw new InvalidArgumentException(sprintf('Invalid Subject: %s', $this->subject));
-        }
-
-        if (($this->replyTo !== null) && !$this->isSubjectCorrect($this->replyTo)) {
-            throw new InvalidArgumentException(sprintf('Invalid Reply-To: %s', $this->replyTo));
-        }
+        $this->validatePublishSubjects($this->subject, $this->replyTo);
     }
 
     public function __toString(): string

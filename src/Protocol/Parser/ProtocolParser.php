@@ -14,6 +14,7 @@ use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\HMsgMessage;
 use Dorpmaster\Nats\Protocol\InfoMessage;
 use Dorpmaster\Nats\Protocol\MsgMessage;
+use Dorpmaster\Nats\Protocol\MessageStatus;
 use Dorpmaster\Nats\Protocol\NatsMessageType;
 use Dorpmaster\Nats\Protocol\OkMessage;
 use Dorpmaster\Nats\Protocol\PingMessage;
@@ -89,7 +90,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
         }
 
         $payloadSize = (int) $size;
-        $payload     = yield $payloadSize;
+        $payload     = $payloadSize === 0 ? '' : yield $payloadSize;
 
         $delimiter = yield 2;
         if ($delimiter !== NatsProtocolMessageInterface::DELIMITER) {
@@ -139,7 +140,7 @@ final readonly class ProtocolParser implements ProtocolParserInterface
             throw new \RuntimeException('Malformed HMSG message payload delimiter');
         }
 
-        return new HMsgMessage($subject, $sid, $payload, $headers, $replyTo ?? null);
+        return new HMsgMessage($subject, $sid, $payload, $headers, $replyTo ?? null, MessageStatus::fromHeaderBlock($headersPayload), $totalLength);
     }
 
     /**
@@ -159,14 +160,15 @@ final readonly class ProtocolParser implements ProtocolParserInterface
 
     private static function parseHeaders(string $payload): HeaderBugInterface
     {
+        $lines    = explode(NatsProtocolMessageInterface::DELIMITER, $payload);
+        $preamble = array_shift($lines);
+        if ($preamble !== 'NATS/1.0' && MessageStatus::fromHeaderBlock($preamble) === null) {
+            throw new \RuntimeException('Malformed HMSG header preamble');
+        }
+
         $headers = new HeaderBag();
-
-        foreach (explode(NatsProtocolMessageInterface::DELIMITER, $payload) as $item) {
-            if (str_contains($item, 'NATS/') === true) {
-                continue;
-            }
-
-            $parts = explode(':', $item);
+        foreach ($lines as $item) {
+            $parts = explode(':', $item, 2);
             if (count($parts) !== 2) {
                 continue;
             }

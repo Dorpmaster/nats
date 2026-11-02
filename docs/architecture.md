@@ -58,11 +58,30 @@ This library separates orchestration concerns from transport and buffering logic
 1. `connect()` moves `NEW|CLOSED -> CONNECTING`.
 2. `Connection::open()` establishes socket and parser feed.
 3. `Client` moves to `CONNECTED`, but outbound application writes stay paused until initial protocol readiness completes.
-4. After inbound `INFO`, client sends `CONNECT`, then `PING`, then waits for inbound `PONG` before resuming buffered application writes and starting regular ping health monitoring.
+4. After the first `INFO` on a new transport, client sends `CONNECT`, then `PING`, then waits for inbound `PONG` before resuming buffered application writes and starting regular ping health monitoring.
 5. Inbound `MSG/HMSG` handlers are scheduled asynchronously after parsing, subject to bounded concurrency and bounded pending queue limits.
 6. On transport/parser failure, `Client` enters `RECONNECTING` and runs failover/backoff.
 7. On reconnect success, the same readiness barrier is applied again; restored subscriptions are replayed before buffered application frames are flushed.
 8. `drain()` enters `DRAINING`, stops accepting new application inbound callbacks, waits bounded time for active + pending dispatch drain, then flushes and unsubscribes before closing to `CLOSED`.
+
+## Asynchronous INFO and the transport handshake
+
+`Client` owns the handshake attempt for each successfully opened transport. It
+marks the attempt before writing CONNECT, so another INFO cannot initiate a
+second CONNECT/PING while the first handshake is waiting for PONG. Every INFO
+still reaches the dispatcher to update supported server metadata and the existing
+`connect_urls` discovery path. Missing URLs do not clear the server pool.
+
+The dispatcher interface remains unchanged: third-party dispatchers may return a
+CONNECT proposal for every INFO; Client sends only the first proposal per transport.
+Later INFO neither replays subscriptions nor resumes/reorders the queue, restarts
+ping monitoring or repeats CONNECTED. Server PING/PONG and periodic client PING
+continue independently. Only the initial handshake PONG makes the transport READY.
+
+A new transport after reconnect or explicit disconnect/connect resets this state.
+CONNECT or handshake-PING write failure enters the normal reconnect/close path;
+the next transport gets a fresh handshake attempt. Diagnostics retain only safe
+scalar metadata, without CONNECT objects or credentials.
 
 ## Transition Orchestration
 
@@ -139,3 +158,46 @@ failure detected
 - pending queue overflow is a controlled transport failure and never silently drops inbound messages.
 
 Handshake ordering is protected by a protocol conformance test using a fake NATS server. The client guarantees that application-level commands are buffered until the connection reaches READY (`INFO -> CONNECT -> PING/PONG`).
+
+## Protocol Logging
+
+`Client`, `MessageDispatcher`, and `Connection` emit selected scalar metadata
+before calling a PSR-3 logger: command type, handshake stage, client state, byte
+counts, and exception type/code. CONNECT objects, connection credentials, socket
+chunks, application payloads, and original exception messages/traces are omitted.
+The same policy applies after reconnect and to callback/write-buffer failures.
+
+DEBUG remains available with the worker's Monolog, `PsrLogMessageProcessor`, and
+AMPHP `ConsoleFormatter` setup. Credential transmission and protocol frames are
+unchanged. Application code still receives the original exceptions and causes.
+
+## JetStream server information
+
+Client exposes selected INFO facts through the optional
+`ServerInformationProviderInterface` without changing `ClientInterface` or the
+dispatcher contract. INFO revision and transport generation invalidate cached
+snapshots on an update or lifecycle change. JetStream capabilities are advisory,
+per-feature protocol rules; they do not probe/mutate resources or infer account
+permissions. Domain/import API targets remain unknown from local INFO alone.
+See [JetStream compatibility](jetstream-compatibility.md).
+
+## Mutation requests and replay
+
+Client owns the request future, inbox and timeout; `RequestLifetime` connects that
+owner to cancellable queue snapshots. Transport selects single-attempt semantics
+for JetStream UPDATE. WriteBuffer owns physical FIFO removal and accounting and
+never puts an attempted single-attempt frame into `failedFrame`. A write failure
+completes the request with its original cause before invoking normal reconnect
+handling. Legacy publication frames retain their replay semantics. The old public
+interfaces remain usable; unsupported optional single-attempt capabilities fail
+explicitly instead of silently downgrading mutation safety.
+
+## Streaming publication channels
+
+The optional `ConnectionBoundPublishClientInterface` owns a persistent inbox and
+per-frame single-attempt write receipts. The JetStream fast session owns flow
+credit, cumulative confirmations, its deadline and immutable terminal result.
+WriteBuffer consumes the attempt immediately before socket send and reports write
+completion after releasing frame accounting. No fast frame enters reconnect
+replay; legacy interfaces retain their behavior. See
+[streaming publication](jetstream-fast-batch.md).

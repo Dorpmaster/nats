@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Tests\Integration;
 
 use Amp\SignalCancellation;
+use Amp\DeferredFuture;
+use Amp\TimeoutCancellation;
 use Amp\Socket\DnsSocketConnector;
 use Amp\Socket\RetrySocketConnector;
 use Dorpmaster\Nats\Client\Client;
@@ -12,17 +14,28 @@ use Dorpmaster\Nats\Client\ClientConfiguration;
 use Dorpmaster\Nats\Client\MessageDispatcher;
 use Dorpmaster\Nats\Client\SubscriptionStorage;
 use Dorpmaster\Nats\Connection\Connection;
+use Dorpmaster\Nats\Domain\Client\ClientState;
 use Dorpmaster\Nats\Connection\ConnectionConfiguration;
 use Dorpmaster\Nats\Domain\JetStream\Admin\JetStreamAdmin;
 use Dorpmaster\Nats\Domain\JetStream\Model\ConsumerConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
 use Dorpmaster\Nats\Domain\JetStream\Publish\JetStreamPublisher;
+use Dorpmaster\Nats\Domain\JetStream\Publish\PublishOptions;
 use Dorpmaster\Nats\Domain\JetStream\Pull\JetStreamPullConsumerFactory;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
 use Dorpmaster\Nats\Event\EventDispatcher;
 use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
+use Dorpmaster\Nats\Protocol\HPubMessage;
+use Dorpmaster\Nats\Protocol\HMsgMessage;
+use Dorpmaster\Nats\Protocol\PubMessage;
+use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Tests\Support\NatsServerHarness;
+use Dorpmaster\Nats\Tests\Support\HMsgHeaderCases;
+use Dorpmaster\Nats\Tests\Support\RecordingLogger;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+
+use function Amp\delay;
 
 final class JetStreamPullConsumerIntegrationTest extends TestCase
 {
@@ -114,7 +127,270 @@ final class JetStreamPullConsumerIntegrationTest extends TestCase
         }
     }
 
-    private function createClient(): Client
+    public static function availableBatches(): iterable
+    {
+        yield 'full one' => [1, 1];
+        yield 'partial two of five' => [2, 5];
+        yield 'empty' => [0, 5];
+    }
+
+    #[DataProvider('availableBatches')]
+    public function testNoWaitReceivesAvailableBatchAndKeepsConnectionUsable(int $available, int $batch): void
+    {
+        self::requireJetStreamMode();
+        $reconnections = 0;
+        $events        = new EventDispatcher();
+        $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$reconnections): void {
+            if ($state === ClientState::RECONNECTING) {
+                $reconnections++;
+            }
+        });
+        $client = $this->createClient($events);
+        $client->connect();
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $publisher = new JetStreamPublisher($client);
+        $stream    = 'NOWAIT_' . $available;
+        $subject   = 'nowait.' . $available;
+        $admin->createStream(new StreamConfig($stream, [$subject]));
+        $admin->createOrUpdateConsumer($stream, new ConsumerConfig('C1', filterSubject: $subject));
+        try {
+            $expected = [];
+            for ($i = 0; $i < $available; $i++) {
+                $expected[] = "msg-$i\r\n\0";
+                $publisher->publish($subject, $expected[$i]);
+            }
+
+            $pull     = (new JetStreamPullConsumerFactory($transport))->create($stream, 'C1');
+            $start    = hrtime(true);
+            $result   = $pull->fetch($batch, 3000, true, idleHeartbeatMs: 100);
+            $elapsed  = hrtime(true) - $start;
+            $messages = iterator_to_array($result->messages());
+            self::assertSame($available, $result->getReceivedCount());
+            self::assertSame($expected, array_map(static fn($message): string => $message->getPayload(), $messages));
+            self::assertLessThan(2_000_000_000, $elapsed, 'Server completion must precede the local deadline');
+            foreach ($messages as $message) {
+                $result->getAcker()->ack($message);
+            }
+
+            // Both the API request and the next pull use the existing connected client.
+            self::assertSame(0, $admin->getConsumerInfo($stream, 'C1')->getNumPending());
+            self::assertSame(0, $pull->fetch(1, 1000, true)->getReceivedCount());
+            self::assertSame(0, $reconnections);
+        } finally {
+            $admin->deleteConsumer($stream, 'C1');
+            $admin->deleteStream($stream);
+            $client->disconnect();
+        }
+    }
+
+    public function testNoWaitMaxBytesReturnsPartialBatchAndKeepsConnectionUsable(): void
+    {
+        self::requireJetStreamMode();
+        $reconnections = 0;
+        $events        = new EventDispatcher();
+        $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$reconnections): void {
+            if ($state === ClientState::RECONNECTING) {
+                $reconnections++;
+            }
+        });
+        $client = $this->createClient($events);
+        $client->connect();
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $publisher = new JetStreamPublisher($client);
+        $stream    = 'NOWAIT_BYTES';
+        $subject   = 'nowait.bytes';
+        $admin->createStream(new StreamConfig($stream, [$subject]));
+        $admin->createOrUpdateConsumer($stream, new ConsumerConfig('C1', filterSubject: $subject));
+        try {
+            $publisher->publish($subject, 'short');
+            $publisher->publish($subject, str_repeat('large', 300));
+            $pull   = (new JetStreamPullConsumerFactory($transport))->create($stream, 'C1');
+            $start  = hrtime(true);
+            $result = $pull->fetch(5, 3000, true, 300);
+            self::assertSame(1, $result->getReceivedCount());
+            self::assertLessThan(2_000_000_000, hrtime(true) - $start);
+            $message = iterator_to_array($result->messages())[0];
+            self::assertSame('short', $message->getPayload());
+            $result->getAcker()->ack($message);
+            self::assertSame(1, $admin->getConsumerInfo($stream, 'C1')->getNumPending());
+            self::assertSame(1, $pull->fetch(1, 1000, true)->getReceivedCount());
+            self::assertSame(0, $reconnections);
+        } finally {
+            $admin->deleteConsumer($stream, 'C1');
+            $admin->deleteStream($stream);
+            $client->disconnect();
+        }
+    }
+
+    public static function headerContentCases(): iterable
+    {
+        return HMsgHeaderCases::cases();
+    }
+
+    /** @param array<string, list<string>> $headers */
+    #[DataProvider('headerContentCases')]
+    public function testHeaderValuesWithNatsSurviveJetStreamPublishAndPull(array $headers): void
+    {
+        self::requireJetStreamMode();
+        $reconnections = 0;
+        $events        = new EventDispatcher();
+        $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$reconnections): void {
+            if ($state === ClientState::RECONNECTING) {
+                $reconnections++;
+            }
+        });
+        $client    = $this->createClient($events);
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $token     = strtoupper(bin2hex(random_bytes(6)));
+        $stream    = 'HMSG_' . $token;
+        $subject   = 'hmsg.content.' . $token;
+        $payload   = "jetstream\r\n\0PUB is payload\r\nend\0";
+        $created   = false;
+        try {
+            $client->connect();
+            $admin->createStream(new StreamConfig($stream, [$subject]));
+            $created = true;
+            $admin->createOrUpdateConsumer($stream, new ConsumerConfig('C1', filterSubject: $subject));
+            // The public publish/pull DTO contract exposes one string per header name.
+            $singleValues = array_map(static fn(array $values): string => $values[0], $headers);
+            $publisher    = new JetStreamPublisher($client);
+            self::assertSame($stream, $publisher->publish($subject, $payload, PublishOptions::create(headers: $singleValues))->getStream());
+            $pull   = (new JetStreamPullConsumerFactory($transport))->create($stream, 'C1');
+            $result = $pull->fetch(1, 2000, true);
+            self::assertSame(1, $result->getReceivedCount());
+            $message = iterator_to_array($result->messages())[0];
+            self::assertSame($payload, $message->getPayload());
+            self::assertSame($singleValues, $message->getHeaders());
+            $result->getAcker()->ack($message);
+
+            // Inspect a real JetStream pull HMSG too, including every repeated value.
+            $ack = json_decode($client->request(new HPubMessage($subject, $payload, new HeaderBag($headers)), 2)->getPayload(), true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame($stream, $ack['stream']);
+            $inbox    = 'INBOX.HMSG' . $token;
+            $received = new DeferredFuture();
+            $sid      = $client->subscribe($inbox, static function ($message) use ($received): null {
+                if (!$received->isComplete()) {
+                    $received->complete($message);
+                }
+                return null;
+            });
+            try {
+                $transport->publishRequest('CONSUMER.MSG.NEXT.' . $stream . '.C1', ['batch' => 1, 'no_wait' => true], $inbox);
+                $raw = $received->getFuture()->await(new TimeoutCancellation(2));
+            } finally {
+                $client->unsubscribe($sid);
+            }
+
+            self::assertInstanceOf(HMsgMessage::class, $raw);
+            self::assertSame($headers, iterator_to_array($raw->getHeaders()));
+            self::assertSame($payload, $raw->getPayload());
+            self::assertNull($raw->getStatus());
+            $client->publish(new PubMessage((string) $raw->getReplyTo(), '+ACK'));
+            self::assertSame(0, $admin->getConsumerInfo($stream, 'C1')->getNumPending());
+            self::assertSame(0, $pull->fetch(1, 1000, true)->getReceivedCount());
+            self::assertSame(0, $reconnections);
+        } finally {
+            try {
+                if ($created) {
+                    $admin->deleteStream($stream);
+                }
+            } finally {
+                $client->disconnect();
+            }
+        }
+    }
+
+    public static function deliveryFrameTypes(): iterable
+    {
+        yield 'MSG' => [null];
+        yield 'HMSG conflicting user header' => ['999'];
+    }
+
+    #[DataProvider('deliveryFrameTypes')]
+    public function testAckMetadataTracksNakRedeliveryForRealMsgAndHmsg(string|null $userCount): void
+    {
+        self::requireJetStreamMode();
+        $logger        = new RecordingLogger();
+        $events        = new EventDispatcher();
+        $reconnections = 0;
+        $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$reconnections): void {
+            if ($state === ClientState::RECONNECTING) {
+                $reconnections++;
+            }
+        });
+        $client    = $this->createClient($events, $logger);
+        $transport = new JetStreamControlPlaneTransport($client);
+        $admin     = new JetStreamAdmin($transport);
+        $token     = strtoupper(bin2hex(random_bytes(6)));
+        $stream    = 'DELIVERY_' . $token;
+        $subject   = 'delivery.' . $token;
+        $payload   = "first and repeated\r\n\0NATS payload\r\n";
+        $created   = false;
+        try {
+            $client->connect();
+            $admin->createStream(new StreamConfig($stream, [$subject]));
+            $created = true;
+            $admin->createOrUpdateConsumer($stream, new ConsumerConfig('C1', ackWaitMs: 30000, filterSubject: $subject));
+            $headers = $userCount === null ? [] : ['Nats-Num-Delivered' => $userCount];
+            (new JetStreamPublisher($client))->publish($subject, $payload, PublishOptions::create(headers: $headers));
+            $pull       = (new JetStreamPullConsumerFactory($transport))->create($stream, 'C1');
+            $firstReply = null;
+            foreach ([1, 2] as $expectedCount) {
+                $before = count($logger->all());
+                $result = $pull->fetch(1, 2000);
+                self::assertSame(1, $result->getReceivedCount());
+                $message = iterator_to_array($result->messages())[0];
+                self::assertSame($expectedCount, $message->getDeliveryCount());
+                self::assertSame($payload, $message->getPayload());
+                self::assertSame($headers, $message->getHeaders());
+                self::assertStringStartsWith('$JS.ACK.', $message->getReplyTo());
+                $records    = array_slice($logger->all(), $before);
+                $dataFrames = array_values(array_filter($records, static fn(array $record): bool => $record['message'] === 'Dispatching the message'
+                    && in_array($record['context']['command'] ?? null, ['MSG', 'HMSG'], true)));
+                self::assertCount(1, $dataFrames);
+                self::assertSame($userCount === null ? 'MSG' : 'HMSG', $dataFrames[0]['context']['command']);
+                $tokens = explode('.', $message->getReplyTo());
+                if (getenv('NATS_ACK_FORMAT') === 'classic') {
+                    self::assertCount(9, $tokens);
+                } elseif (getenv('NATS_ACK_FORMAT') === 'expanded') {
+                    self::assertGreaterThanOrEqual(11, count($tokens));
+                    self::assertSame('EU', $tokens[2]);
+                }
+                if ($expectedCount === 1) {
+                    $firstReply = $message->getReplyTo();
+                    $result->getAcker()->nak($message);
+                } else {
+                    self::assertNotSame($firstReply, $message->getReplyTo());
+                    $result->getAcker()->ack($message);
+                }
+            }
+            $deadline = hrtime(true) + 2_000_000_000;
+            do {
+                $info = $admin->getConsumerInfo($stream, 'C1');
+                if ($info->getNumAckPending() === 0 && $info->getNumPending() === 0) {
+                    break;
+                }
+                delay(0.01);
+            } while (hrtime(true) < $deadline);
+            self::assertSame(0, $info->getNumAckPending());
+            self::assertSame(0, $info->getNumPending());
+            self::assertSame(0, $pull->fetch(1, 1000, true)->getReceivedCount());
+            self::assertSame(0, $reconnections);
+        } finally {
+            try {
+                if ($created) {
+                    $admin->deleteStream($stream);
+                }
+            } finally {
+                $client->disconnect();
+            }
+        }
+    }
+
+    private function createClient(EventDispatcher|null $events = null, RecordingLogger|null $logger = null): Client
     {
         $cancellation = new SignalCancellation([SIGTERM, SIGINT, SIGHUP]);
 
@@ -123,7 +399,7 @@ final class JetStreamPullConsumerIntegrationTest extends TestCase
 
         $connection          = new Connection($connector, $config);
         $clientConfiguration = new ClientConfiguration();
-        $eventDispatcher     = new EventDispatcher();
+        $eventDispatcher     = $events ?? new EventDispatcher();
 
         $connectionInfo    = new ConnectInfo(
             verbose: false,
@@ -144,6 +420,7 @@ final class JetStreamPullConsumerIntegrationTest extends TestCase
             eventDispatcher: $eventDispatcher,
             messageDispatcher: $messageDispatcher,
             storage: $storage,
+            logger: $logger,
         );
     }
 

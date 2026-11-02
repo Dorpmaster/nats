@@ -9,6 +9,7 @@ use Amp\TimeoutCancellation;
 use Dorpmaster\Nats\Domain\Client\InboundDispatchOverflowException;
 use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\MsgMessageInterface;
+use Dorpmaster\Nats\Telemetry\ProtocolLogContext;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
@@ -124,7 +125,7 @@ final class InboundDispatchScheduler
             $this->logger?->warning('inbound.dispatch.drain.timeout', [
                 'active' => $this->activeCount,
                 'pending' => count($this->pendingQueue),
-                'exception' => $exception,
+                ...ProtocolLogContext::exception($exception),
             ]);
         }
     }
@@ -155,7 +156,7 @@ final class InboundDispatchScheduler
                 $callback();
             } catch (Throwable $exception) {
                 $this->logger?->error('inbound.dispatch.callback_error', [
-                    'exception' => $exception,
+                    ...ProtocolLogContext::exception($exception),
                 ]);
             } finally {
                 $this->completeDispatch($generation);

@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace Dorpmaster\Nats\Protocol;
 
 use Dorpmaster\Nats\Client\WriteBuffer\OutboundFrame;
+use Dorpmaster\Nats\Client\WriteBuffer\RequestLifetime;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 
 final class OutboundFrameBuilder
 {
-    public function build(NatsProtocolMessageInterface $message): OutboundFrame
+    public function build(NatsProtocolMessageInterface $message, RequestLifetime|null $request = null): OutboundFrame
     {
         $data = (string) $message;
 
@@ -17,6 +18,7 @@ final class OutboundFrameBuilder
             message: $message,
             data: $data,
             bytes: strlen($data),
+            request: $request,
         );
     }
 }

@@ -58,7 +58,7 @@ final class JetStreamPublisherTest extends TestCase
         self::assertSame(10, $ack->getSeq());
         self::assertFalse($ack->isDuplicate());
         $logger->assertHas(LogLevel::DEBUG, 'js.publish.start', static fn (array $context): bool => ($context['subject'] ?? null) === 'orders.created');
-        $logger->assertHas(LogLevel::DEBUG, 'js.publish.ack', static fn (array $context): bool => ($context['stream'] ?? null) === 'ORDERS');
+        $logger->assertHas(LogLevel::DEBUG, 'js.publish.ack', static fn (array $context): bool => ($context['operation'] ?? null) === 'publish');
     }
 
     public function testPublishMapsJetStreamErrorResponseToException(): void

@@ -23,6 +23,7 @@ use Dorpmaster\Nats\Protocol\Metadata\ConnectInfo;
 use Dorpmaster\Nats\Protocol\PubMessage;
 use Dorpmaster\Nats\Tests\Support\AsyncTestTools;
 use Dorpmaster\Nats\Tests\Support\NatsClusterHarness;
+use Dorpmaster\Nats\Tests\Support\ObservedConnection;
 use PHPUnit\Framework\TestCase;
 
 use function Amp\delay;
@@ -226,6 +227,115 @@ final class ClientClusterFailoverIntegrationTest extends TestCase
             pingReconnectOnTimeout: true,
             servers: [new ServerAddress('n1', 4222), new ServerAddress('n2', 4222), new ServerAddress('n3', 4222)],
         );
+    }
+
+    public function testAsyncTopologyInfoKeepsConnectionReadyAndDiscoversFailoverTarget(): void
+    {
+        self::requireClusterMode();
+        $this->setTimeout(70);
+        $this->runAsyncTest(function (): void {
+            $client   = null;
+            $observed = null;
+            $states   = [];
+            try {
+                NatsClusterHarness::stopNode('n3');
+                NatsClusterHarness::waitNodeDown('n3');
+                $this->waitForCondition(static function (): bool {
+                    $socket = @fsockopen('n1', 4222, $error, $description, 0.2);
+                    if (!is_resource($socket)) {
+                        return false;
+                    }
+                    stream_set_timeout($socket, 0, 250000);
+                    $line = fgets($socket);
+                    fclose($socket);
+                    if (!is_string($line) || !str_starts_with($line, 'INFO ')) {
+                        return false;
+                    }
+                    $urls = json_decode(substr($line, 5), true, 512, JSON_THROW_ON_ERROR)['connect_urls'] ?? [];
+                    return in_array('n2:4222', $urls, true) && !in_array('n3:4222', $urls, true);
+                }, 10);
+                $observed = new ObservedConnection(new Connection(new DnsSocketConnector(), new ConnectionConfiguration('n1', 4222)));
+                $storage  = new SubscriptionStorage();
+                $events   = new EventDispatcher();
+                $states   = [];
+                $events->subscribe('connectionStatusChanged', static function (string $event, ClientState $state) use (&$states): void {
+                    $states[] = $state;
+                });
+                $client = new Client(
+                    configuration: new ClientConfiguration(reconnectEnabled: true, maxReconnectAttempts: 20, reconnectBackoffInitialMs: 10, reconnectBackoffMaxMs: 100, reconnectJitterFraction: 0.0, servers: [new ServerAddress('n1', 4222)], pingEnabled: true, pingIntervalMs: 100, pingTimeoutMs: 200, pingReconnectOnTimeout: true),
+                    cancellation: new SignalCancellation([SIGTERM, SIGINT, SIGHUP]),
+                    connection: $observed,
+                    eventDispatcher: $events,
+                    messageDispatcher: new MessageDispatcher(new ConnectInfo(false, false, false, 'php', PHP_VERSION, protocol: 1), $storage),
+                    storage: $storage,
+                );
+                $client->connect();
+                $subject = 'it.topology.' . bin2hex(random_bytes(6));
+                $client->subscribe($subject, static fn(NatsProtocolMessageInterface $message): PubMessage => new PubMessage($message->getReplyTo(), 'ok'));
+                self::assertSame('ok', $client->request(new PubMessage($subject, 'before-expand'), 2)->getPayload());
+                self::assertNotContains('n3', array_map(static fn($server): string => $server->getHost(), $client->getKnownServers()));
+                NatsClusterHarness::startNode('n3');
+                NatsClusterHarness::waitNodeReady('n3');
+                $this->waitForCondition(static fn(): bool => in_array('n3', array_map(static fn($server): string => $server->getHost(), $client->getKnownServers()), true), 10);
+                self::assertGreaterThanOrEqual(2, count($observed->infos));
+                self::assertNotEmpty(array_filter($observed->infos, static fn(array $info): bool => $info['session'] === 0 && in_array('n3:4222', $info['connect_urls'] ?? [], true)));
+                self::assertSame('ok', $client->request(new PubMessage($subject, 'after-expand'), 2)->getPayload());
+                self::assertSame('ok', $client->request(new PubMessage($subject, 'control-barrier'), 2)->getPayload());
+                self::assertCount(1, $observed->commands);
+                self::assertSame(1, count(array_filter($observed->commands[0], static fn($command): bool => $command === 'CONNECT')));
+                self::assertSame(['CONNECT', 'PING'], array_slice($observed->commands[0], 0, 2));
+                self::assertNotContains(ClientState::RECONNECTING, $states);
+                self::assertSame(1, count(array_filter($states, static fn($state): bool => $state === ClientState::CONNECTED)));
+                // Leave only the newly discovered node available for the failover.
+                NatsClusterHarness::stopNode('n2');
+                NatsClusterHarness::waitNodeDown('n2');
+                NatsClusterHarness::stopNode('n1');
+                NatsClusterHarness::waitNodeDown('n1');
+                $this->waitForCondition(static fn(): bool => $client->getState() === ClientState::CONNECTED && $client->getCurrentServer()?->getHost() === 'n3', 15);
+                self::assertSame('ok', $client->request(new PubMessage($subject, 'after-failover'), 3)->getPayload());
+                self::assertSame('n3', $client->getCurrentServer()?->getHost());
+                self::assertCount(2, $observed->commands);
+                foreach ($observed->commands as $commands) {
+                    self::assertSame(1, count(array_filter($commands, static fn($command): bool => $command === 'CONNECT')));
+                    self::assertSame(['CONNECT', 'PING'], array_slice($commands, 0, 2));
+                }
+                self::assertSame(2, count(array_filter($states, static fn($state): bool => $state === ClientState::CONNECTED)));
+                $audit = getenv('NATS_T5_AUDIT_DIR');
+                if ($audit !== false && is_dir($audit)) {
+                    file_put_contents($audit . '/real-cluster-topology.json', json_encode(['commands' => $observed->commands, 'info' => $observed->infos, 'states' => array_map(static fn(ClientState $state): string => $state->value, $states)], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+                }
+            } finally {
+                $audit = getenv('NATS_T5_AUDIT_DIR');
+                if ($audit !== false && is_dir($audit)) {
+                    file_put_contents($audit . '/real-cluster-debug.json', json_encode([
+                        'state' => $client?->getState()->value,
+                        'current' => $client?->getCurrentServer()?->getHost(),
+                        'known' => array_map(static fn($server) => $server->getHost(), $client?->getKnownServers() ?? []),
+                        'commands' => $observed?->commands,
+                        'infos' => $observed?->infos,
+                        'states' => array_map(static fn($state) => $state->value, $states),
+                    ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+                }
+                $client?->disconnect();
+                foreach (['n1', 'n2', 'n3'] as $node) {
+                    NatsClusterHarness::startNode($node);
+                    NatsClusterHarness::waitNodeReady($node);
+                }
+            }
+        });
+    }
+
+    /** @param \Closure(): bool $condition */
+    private function waitForCondition(\Closure $condition, float $timeoutSeconds): void
+    {
+        $deadline = hrtime(true) + (int) ($timeoutSeconds * 1_000_000_000);
+        do {
+            if ($condition()) {
+                return;
+            }
+            delay(0.02);
+        } while (hrtime(true) < $deadline);
+        self::fail('Timed out waiting for cluster topology/failover');
     }
 
     private function createClient(ClientConfiguration $clientConfiguration): Client

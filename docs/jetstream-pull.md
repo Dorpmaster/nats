@@ -11,6 +11,11 @@ $admin->createStream(new StreamConfig('ORDERS', ['orders.*']));
 $admin->createOrUpdateConsumer('ORDERS', new ConsumerConfig('C1', filterSubject: 'orders.created'));
 ```
 
+The factory and direct `JetStreamPullConsumer` constructor apply the same
+[resource name validation](jetstream-admin.md#local-validation) as Admin.
+Invalid stream or durable consumer names raise `InvalidArgumentException`
+before an inbox subscription or pull request is created.
+
 ## Fetch
 
 ```php
@@ -26,13 +31,21 @@ foreach ($result->messages() as $message) {
 }
 ```
 
-Fetch request uses:
+Fetch subscribes to a unique inbox before publishing. Each call owns its completion
+state and local deadline, including concurrent calls on the same consumer. The
+subscription stays active until the batch or byte budget is fulfilled, the server
+finishes the request, an error occurs, or the local deadline expires. Cleanup
+cancels the timer and unsubscribes once; late callbacks cannot change the result.
+A cleanup failure cannot replace the original fetch error.
 
-- `batch`
-- `expires` (ms -> ns)
-- `no_wait`
-- optional `max_bytes`
-- optional `idle_heartbeat` (ms -> ns)
+Request parameters:
+
+- `batch`, `no_wait`, and optional `max_bytes` are sent in both modes.
+- With `noWait: false`, `expiresMs` is sent as `expires` in nanoseconds;
+  optional `idleHeartbeatMs` is sent as `idle_heartbeat` in nanoseconds.
+- With `noWait: true`, `expiresMs` is only a local response deadline.
+  Neither `expires` nor `idle_heartbeat` is sent, even if a heartbeat interval
+  was supplied. This avoids incompatible no-wait/expiry/heartbeat combinations.
 
 ## Message DTO + Ack API
 
@@ -44,6 +57,10 @@ Ack actions are executed by `JetStreamMessageAckerInterface`:
 - `nak($message, $delayMs)` -> `-NAK <delayNs>`
 - `term($message)` -> `+TERM`
 - `inProgress($message)` -> `+WPI`
+
+See [exact message and Admin metadata](jetstream-metadata.md) for optional
+`getMetadata()` and full repeated-header snapshots, numeric ranges and nanosecond
+time conversion. Existing getters and ACK/NAK/TERM behavior are unchanged.
 
 ## Continuous Consume Loop
 
@@ -89,8 +106,27 @@ Backpressure is local to consume handle and based on delivered-but-not-released 
 
 `DROP_NEW` does **not** auto-ack dropped messages. They remain unacknowledged and may be redelivered by JetStream.
 Guard behavior:
-- if header `Nats-Num-Delivered` is present and value is `> 5`, dropped message is auto-terminated (`+TERM`)
-- if header is absent, guard is not applied
+- only a dropped message with an ACK-subject delivery count **greater than 5** is
+  auto-terminated (`+TERM`);
+- counts up to 5 inclusive and unknown counts (`null`) do not trigger automatic TERM;
+- messages accepted for processing are not terminated just because their count is high.
+
+`getDeliveryCount()` reads the original reply subject for both MSG and HMSG:
+
+- classic: `$JS.ACK.<stream>.<consumer>.<delivered>.<sseq>.<cseq>.<timestamp>.<pending>`;
+- expanded: `$JS.ACK.<domain>.<account>.<stream>.<consumer>.<delivered>.<sseq>.<cseq>.<timestamp>.<pending>`
+  with optional trailing extension tokens. `_` is the supported empty-domain placeholder.
+
+The prefix, nonempty tokens and decimal metadata fields are validated. Delivery
+counts must be positive ASCII decimal integers representable in PHP `int`; signs,
+exponent notation, whitespace and overflow are rejected. Leading zeroes
+are accepted without changing the original reply subject. An absent, malformed or
+unsupported ACK subject yields `null` and does not prevent message delivery.
+`Nats-Num-Delivered` remains an ordinary user header and never supplies or overrides
+the count. Additional valid tokens are opaque: their contents, length and number
+do not change the delivery count. A dot is always a field separator; the parser
+validates the resulting token sequence without inferring fractional notation.
+ACK/NAK/TERM use the exact original reply subject, without reconstruction.
 
 ## Reconnect Behavior
 
@@ -101,8 +137,38 @@ Guard behavior:
 
 ## noWait / expires Semantics
 
-- `noWait=true` on empty consumer returns empty fetch result (`receivedCount=0`).
-- `expiresMs` bounds fetch duration; method returns collected messages on timeout.
+`no_wait` asks the server not to wait for new messages. The client still waits for
+responses to its request. Available messages are returned in delivery order, with
+the existing explicit ACK contract. An empty or partial batch returns as soon as
+the server confirms completion; it does not wait out `expiresMs`.
+
+For `noWait: true`, silence or partial data without confirmed completion raises
+`JetStreamTimeoutException` at the local deadline. A full batch or fulfilled
+`maxBytes` budget needs no additional terminal status. NATS counts subject, ACK
+reply, header block and payload bytes against that budget. Parsed HMSG frames
+retain their received body size through the optional `WireBodySizeMessageInterface`,
+so normalization of header whitespace does not change completion at an exact limit.
+
+For `noWait: false`, server expiry returns collected messages. The existing local
+fallback remains `expiresMs + 200 ms` and returns collected messages if the server
+has not sent a terminal response.
+
+### Protocol statuses
+
+The protocol parser exposes the first HMSG header line as optional `MessageStatus`
+through `StatusMessageInterface`; regular headers remain separate. Status-only
+frames with no ordinary headers or payload are supported. Existing HMSG
+constructor arguments and message interfaces remain compatible.
+
+- `100`: heartbeat; keep waiting and exclude it from the result.
+- `404` / `408`: normal completion (no messages / request expiry).
+- `409` with `Batch Completed` or `Message Size Exceeds MaxBytes`: normal completion.
+- Other statuses: `JetStreamApiException` preserving server code and description,
+  including `409 Consumer Deleted` and `503 No Responders`.
+
+Service frames never become application messages. Legacy JSON error responses
+remain supported; JSON `404` completes an empty/partial fetch and other JSON
+errors retain their code and description.
 
 ## Delivery Guarantees
 

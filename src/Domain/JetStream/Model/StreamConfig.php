@@ -14,7 +14,28 @@ final readonly class StreamConfig
         private array $subjects,
         private string|null $storage = null,
         private int|null $replicas = null,
+        private bool|null $allowAtomicPublish = null,
+        private bool|null $allowBatchPublish = null,
+        private int|null $maxConsumers = null,
     ) {
+        if ($maxConsumers !== null && $maxConsumers < -1) {
+            throw new \InvalidArgumentException('Invalid maxConsumers: expected -1 or a nonnegative integer');
+        }
+    }
+
+    public function getAllowAtomicPublish(): bool|null
+    {
+        return $this->allowAtomicPublish;
+    }
+
+    public function getAllowBatchPublish(): bool|null
+    {
+        return $this->allowBatchPublish;
+    }
+
+    public function getMaxConsumers(): int|null
+    {
+        return $this->maxConsumers;
     }
 
     public function getName(): string
@@ -51,6 +72,12 @@ final readonly class StreamConfig
 
         if ($this->replicas !== null) {
             $payload['num_replicas'] = $this->replicas;
+        }
+
+        foreach (['allow_atomic' => $this->allowAtomicPublish, 'allow_batched' => $this->allowBatchPublish, 'max_consumers' => $this->maxConsumers] as $key => $value) {
+            if ($value !== null) {
+                $payload[$key] = $value;
+            }
         }
 
         return $payload;

@@ -9,9 +9,11 @@ use Dorpmaster\Nats\Protocol\Contracts\HMsgMessageInterface;
 use Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface;
 use Dorpmaster\Nats\Protocol\Internal\IsSidCorrect;
 use Dorpmaster\Nats\Protocol\Internal\IsSubjectCorrect;
+use Dorpmaster\Nats\Protocol\Contracts\StatusMessageInterface;
+use Dorpmaster\Nats\Protocol\Contracts\WireBodySizeMessageInterface;
 use InvalidArgumentException;
 
-final readonly class HMsgMessage implements NatsProtocolMessageInterface, HMsgMessageInterface
+final readonly class HMsgMessage implements NatsProtocolMessageInterface, HMsgMessageInterface, StatusMessageInterface, WireBodySizeMessageInterface
 {
     use IsSubjectCorrect;
     use IsSidCorrect;
@@ -26,8 +28,10 @@ final readonly class HMsgMessage implements NatsProtocolMessageInterface, HMsgMe
         private string $payload,
         private HeaderBugInterface $headers,
         private string|null $replyTo = null,
+        private MessageStatus|null $status = null,
+        private int|null $wireBodySize = null,
     ) {
-        if ($this->headers->count() === 0) {
+        if ($this->headers->count() === 0 && $this->status === null) {
             throw new InvalidArgumentException('Headers must not be empty');
         }
 
@@ -45,7 +49,7 @@ final readonly class HMsgMessage implements NatsProtocolMessageInterface, HMsgMe
 
         $this->payloadSize = strlen($this->payload);
         // The size of the headers section in bytes including the ␍␊␍␊ delimiter before the payload.
-        $this->headersSize = strlen((string) $this->headers) + 4;
+        $this->headersSize = strlen($this->headerBlock()) + 4;
         $this->totalSize   = $this->payloadSize + $this->headersSize;
     }
 
@@ -60,7 +64,7 @@ final readonly class HMsgMessage implements NatsProtocolMessageInterface, HMsgMe
                 $this->getHeadersSize(),
                 $this->getTotalSize(),
                 NatsProtocolMessageInterface::DELIMITER,
-                (string) $this->getHeaders(),
+                $this->headerBlock(),
                 NatsProtocolMessageInterface::DELIMITER,
                 NatsProtocolMessageInterface::DELIMITER,
                 $this->getPayload(),
@@ -77,12 +81,34 @@ final readonly class HMsgMessage implements NatsProtocolMessageInterface, HMsgMe
             $this->getHeadersSize(),
             $this->getTotalSize(),
             NatsProtocolMessageInterface::DELIMITER,
-            (string) $this->getHeaders(),
+            $this->headerBlock(),
             NatsProtocolMessageInterface::DELIMITER,
             NatsProtocolMessageInterface::DELIMITER,
             $this->getPayload(),
             NatsProtocolMessageInterface::DELIMITER,
         );
+    }
+
+    public function getWireBodySize(): int
+    {
+        return $this->wireBodySize ?? $this->getTotalSize();
+    }
+
+    public function getStatus(): MessageStatus|null
+    {
+        return $this->status;
+    }
+
+    private function headerBlock(): string
+    {
+        $headers = (string) $this->headers;
+        if ($this->status === null) {
+            return $headers;
+        }
+
+        return 'NATS/1.0 ' . $this->status->code
+            . ($this->status->description === '' ? '' : ' ' . $this->status->description)
+            . substr($headers, strlen('NATS/1.0'));
     }
 
     public function getType(): NatsMessageType

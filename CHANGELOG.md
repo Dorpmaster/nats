@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.0] - 2026-11-02
+
+### Added
+
+- JetStream capability checks based on the current connection's `INFO.api_lvl`, configurable Admin API prefixes, structured server `err_code` access, and optional stream settings for atomic/batched publication and consumer limits. `updateStream()` patches selected fields while preserving the rest of the stream configuration, including exact JSON values.
+- Exact JetStream message metadata and immutable Stream/Consumer Info snapshots: decimal counters and sequences, nanosecond timestamps, repeated header values, and separate current and desired cluster/replica information.
+- `resetConsumer()` to resume from the stream ACK floor plus one or an explicit UInt64 stream sequence, returning the server-confirmed reset position and Consumer Info. RESET and UPDATE use single-attempt requests that are not replayed after reconnect; a timeout may require checking server state before retrying.
+- `publishAtomicBatch()` to commit an ordered batch to one stream as a whole, with ordinary message commit or a separate EOB marker. Lost commit confirmation exposes the batch ID and an unknown-outcome flag. Publication requires confirmed server/stream support, diagnostic access and a verified route before any batch data is sent.
+- `openFastBatch()` for streaming publication with bounded message/byte credit and cumulative acknowledgements. Messages can be visible before completion. Partial failures report the confirmed prefix, problem index and unknown message ranges; final acknowledgements settle that prefix, including fully deduplicated batches. Unsent frames are withdrawn on cancellation, expiry or server refusal, and the batch is not replayed after reconnect.
+
+### Changed
+
+- Raised the minimum `amphp/byte-stream` version to `2.1.3` (`^2.1.3`, allowing `>=2.1.3 <3.0.0`) to prevent stalled TLS reads with non-select event-loop drivers and report an error when writing to a disconnected peer makes `fwrite()` return zero bytes. See the [AMPHP Byte Stream 2.1.3 release notes](https://github.com/amphp/byte-stream/releases/tag/v2.1.3). PHP remains `^8.5`; other dependency and extension requirements are unchanged. Applications locking `amphp/byte-stream` to `2.1.2` or earlier must update it together with the driver when upgrading to `1.3.0`.
+
+### Security
+
+- Prevent NATS command injection through outgoing protocol fields. Validate JetStream resource names before requests or inbox creation and reject unsafe PUB/HPUB subjects and reply-to values, plus SUB/UNSUB subject, SID and queue-group fields where used, including trailing newlines. Valid JetStream names such as `ORDERS@EU`, `ORDERS+EU` and `WORKER@EU`, subscription patterns, existing Core wildcard contracts and binary payloads remain supported.
+- Prevent password/token leakage through DEBUG logging of CONNECT. Handshake, reconnect, socket I/O and error diagnostics now pass safe metadata to PSR-3 loggers instead of credential-bearing objects, raw frames or payloads. This protects new log records; existing logs are not rewritten.
+
+### Fixed
+
+- `fetch(noWait: true)` now waits for asynchronous replies and returns a partial or empty batch on the server's terminating response. `expiresMs` bounds local waiting; a missing completion response raises `JetStreamTimeoutException`, even after partial delivery. Heartbeats, status-only HMSG, server errors and byte-limit completion are handled without returning service frames as messages.
+- Parse empty MSG payloads and fragmented MSG/HMSG without losing frame boundaries. Preserve HMSG status metadata and ordinary headers containing `NATS/`, URLs or multiple colons, including repeated values in order, binary payloads and original body sizes.
+- Keep Core and JetStream HPUB lengths consistent with the current mutable header bag. Queue accounting, socket writes and ordinary write retries use the same serialized frame captured at enqueue time.
+- Derive `getDeliveryCount()` from classic or expanded JetStream ACK subjects, independently of user `Nats-Num-Delivered` headers and opaque extension tokens. Missing or invalid counts remain `null`; automatic DROP_NEW termination applies only to dropped messages with a known count greater than five.
+- Handle repeated INFO as server/discovery updates without another CONNECT, handshake PING, readiness transition or subscription replay. A new transport still performs its own handshake, and a delayed reader from an old connection cannot close its replacement.
+- Apply TLS `allowSelfSigned` to PHP's `allow_self_signed` option without lowering the security level. With `verifyPeer=true`, certificate validity and server-name checks remain enabled; CA, minimum TLS, ALPN and mTLS settings are preserved across reconnect/failover. Unsupported sockets fail explicitly, and failed transports are closed before retry.
+- Validate known Admin JSON fields against their original token types, including numeric values outside PHP int. Preserve absent versus empty stream subjects, legacy array-only transport compatibility and exact configuration snapshots; malformed responses cannot silently change stream routing during an update.
+- Restore isolated Docker test setup and reliable cleanup.
+
+For full details and upgrade guidance, see [RELEASE_NOTES_1.3.0.md](RELEASE_NOTES_1.3.0.md).
+
 ## [1.2.0] - 2026-03-27
 
 ### Added
