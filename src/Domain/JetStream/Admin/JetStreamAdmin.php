@@ -75,6 +75,8 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
             'allow_atomic' => $config->getAllowAtomicPublish(),
             'allow_batched' => $config->getAllowBatchPublish(),
             'max_consumers' => $config->getMaxConsumers(),
+            'allow_msg_schedules' => $config->getAllowMessageSchedules(),
+            'allow_msg_ttl' => $config->getAllowMessageTtl(),
         ], static fn (mixed $value): bool => $value !== null));
         $this->getLogger()->debug('js.admin.stream.create.success', [
             'operation' => 'stream_create',

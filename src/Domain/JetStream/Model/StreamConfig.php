@@ -17,6 +17,8 @@ final readonly class StreamConfig
         private bool|null $allowAtomicPublish = null,
         private bool|null $allowBatchPublish = null,
         private int|null $maxConsumers = null,
+        private bool|null $allowMessageSchedules = null,
+        private bool|null $allowMessageTtl = null,
     ) {
         if ($maxConsumers !== null && $maxConsumers < -1) {
             throw new \InvalidArgumentException('Invalid maxConsumers: expected -1 or a nonnegative integer');
@@ -33,6 +35,14 @@ final readonly class StreamConfig
         return $this->allowBatchPublish;
     }
 
+    public function getAllowMessageSchedules(): bool|null
+    {
+        return $this->allowMessageSchedules;
+    }
+    public function getAllowMessageTtl(): bool|null
+    {
+        return $this->allowMessageTtl;
+    }
     public function getMaxConsumers(): int|null
     {
         return $this->maxConsumers;
@@ -74,7 +84,7 @@ final readonly class StreamConfig
             $payload['num_replicas'] = $this->replicas;
         }
 
-        foreach (['allow_atomic' => $this->allowAtomicPublish, 'allow_batched' => $this->allowBatchPublish, 'max_consumers' => $this->maxConsumers] as $key => $value) {
+        foreach (['allow_atomic' => $this->allowAtomicPublish, 'allow_batched' => $this->allowBatchPublish, 'max_consumers' => $this->maxConsumers, 'allow_msg_schedules' => $this->allowMessageSchedules, 'allow_msg_ttl' => $this->allowMessageTtl] as $key => $value) {
             if ($value !== null) {
                 $payload[$key] = $value;
             }

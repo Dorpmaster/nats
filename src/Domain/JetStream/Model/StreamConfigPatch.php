@@ -15,6 +15,8 @@ final readonly class StreamConfigPatch
         private bool|null $allowAtomicPublish = null,
         private bool|null $allowBatchPublish = null,
         private int|null $maxConsumers = null,
+        private bool|null $allowMessageSchedules = null,
+        private bool|null $allowMessageTtl = null,
     ) {
         if ($subjects !== null) {
             if (!array_is_list($subjects)) {
@@ -52,6 +54,8 @@ final readonly class StreamConfigPatch
             'allow_atomic' => $this->allowAtomicPublish,
             'allow_batched' => $this->allowBatchPublish,
             'max_consumers' => $this->maxConsumers,
+            'allow_msg_schedules' => $this->allowMessageSchedules,
+            'allow_msg_ttl' => $this->allowMessageTtl,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

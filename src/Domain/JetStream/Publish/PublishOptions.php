@@ -25,6 +25,7 @@ final readonly class PublishOptions
         private int|null $expectedLastSeq = null,
         private string|null $expectedLastMsgId = null,
         array $headers = [],
+        private ScheduleOptions|null $schedule = null,
     ) {
         if ($this->expectedLastSeq !== null && $this->expectedLastSeq <= 0) {
             throw new InvalidArgumentException('expectedLastSeq must be greater than zero');
@@ -52,6 +53,7 @@ final readonly class PublishOptions
         int|null $expectedLastSeq = null,
         string|null $expectedLastMsgId = null,
         array $headers = [],
+        ScheduleOptions|null $schedule = null,
     ): self {
         return new self(
             msgId: $msgId,
@@ -59,7 +61,13 @@ final readonly class PublishOptions
             expectedLastSeq: $expectedLastSeq,
             expectedLastMsgId: $expectedLastMsgId,
             headers: $headers,
+            schedule: $schedule,
         );
+    }
+
+    public function getSchedule(): ScheduleOptions|null
+    {
+        return $this->schedule;
     }
 
     /** @return array<string, string> */
@@ -83,6 +91,26 @@ final readonly class PublishOptions
             $systemHeaders[self::HEADER_EXPECTED_LAST_MSG_ID] = $this->expectedLastMsgId;
         }
 
+        if ($this->schedule !== null) {
+            if ($this->expectedStream !== null && $this->expectedStream !== $this->schedule->stream) {
+                throw new InvalidArgumentException('Invalid expectedStream: conflicts with schedule stream');
+            }
+            $systemHeaders += $this->schedule->toHeaders();
+            foreach ($systemHeaders as $name => $value) {
+                if (preg_match('/[\r\n\x00]/', $value) === 1) {
+                    throw new InvalidArgumentException('Invalid schedule header ' . $name);
+                }
+            }
+            foreach ($this->headers as $name => $value) {
+                $lower = strtolower($name);
+                if (str_starts_with($lower, 'nats-schedule') || str_starts_with($lower, 'nats-batch-') || in_array($lower, ['nats-expected-stream', 'nats-required-api-level', 'nats-rollup', 'nats-ttl'], true)) {
+                    throw new InvalidArgumentException('Custom headers conflict with schedule system header ' . $name);
+                }
+                if (preg_match('/[\r\n\x00]/', $name . $value) === 1) {
+                    throw new InvalidArgumentException('Invalid schedule custom headers: control character');
+                }
+            }
+        }
         $systemHeaderNames = array_map('strtolower', array_keys($systemHeaders));
 
         foreach (array_keys($this->headers) as $headerName) {

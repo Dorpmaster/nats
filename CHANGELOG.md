@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4.0] - Unreleased
+
+### Added
+
+- Typed server-side JetStream schedules through `PublishOptions::schedule`: RFC3339 `@at`, whole-second `@every`, six-field cron with UTC/IANA time zones, source sampling, subject rollup and generated-message TTL. Add optional stream schedule/TTL flags for CREATE and selected UPDATE, verify mode/flags/routes before data, and expose uncertain definition writes without reconnect replay. A definition PubAck is separate from target delivery. See [message schedules](docs/jetstream-schedules.md) for examples and stopping a recurring schedule.
+
+### Fixed
+
+- Reject schedule TTL values whose expiration would overflow the server nanosecond clock before sending a definition. Account for the execution time and publication deadline, and reserve a separate documented 60-second target-write lateness window for `@at` TTL checks; bound recurring definitions with generated TTL to a documented 365-day server lifetime. Reject active or malformed `subject_transform` values and streams with `no_ack=true` or an invalid `no_ack` type before schedule publication.
+
 ## [1.3.0] - 2026-11-02
 
 ### Added

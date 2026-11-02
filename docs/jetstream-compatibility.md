@@ -77,3 +77,11 @@ new configuration/prefix tests plus the original Admin/publish/pull/consume suit
 on each version, including a restart. All tests must execute without skips.
 `--version 2.12.6` (repeatable) and `--image IMAGE` can be supplied directly to
 `python3 tests/Support/run-jetstream-compatibility.py` for a narrower run.
+
+## Message scheduling (1.4.0)
+
+`MESSAGE_SCHEDULE_AT` requires API level 2. `MESSAGE_SCHEDULE_EXTENDED` requires
+level 4 for intervals, cron/time zones, source sampling or scheduled rollup.
+Typed publication verifies the current target and flags before writing; see
+[message schedules](jetstream-schedules.md). Existing batch/reset thresholds
+remain unchanged.

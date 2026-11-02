@@ -434,3 +434,7 @@ integration-jetstream-fast: build
 .PHONY: integration-jetstream-fast-cluster
 integration-jetstream-fast-cluster: build
 	python3 tests/Support/run-jetstream-fast.py --cluster
+
+.PHONY: integration-jetstream-schedules
+integration-jetstream-schedules: build
+	python3 tests/Support/run-jetstream-schedules.py
