@@ -285,3 +285,7 @@ operation therefore times out with an uncertain outcome; it is not retried. A
 subsequent INFO through that import succeeds and can inspect the changed state.
 Local and domain-prefixed RESET work on 2.14.0; the same import roundtrip works on
 2.15.2. This observation is not used as a driver capability rule.
+
+## Sources and mirrors (1.4.0)
+
+See [typed sources, mirrors and consumer ownership](jetstream-sources.md) for configuration, API level checks, update/removal, actual link state and independent delivery verification.

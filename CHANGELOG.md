@@ -6,10 +6,12 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Typed JetStream sources and mirrors with optional application-provided durable push consumers, API level 4 admission, selected link removal, exact observed replication state and preservation of unpatched nested configuration. Keep application-owned consumers on link removal; distinguish them from NATS-managed durable sourcing on WorkQueue/Interest streams. See [sources and mirrors](docs/jetstream-sources.md).
 - Typed server-side JetStream schedules through `PublishOptions::schedule`: RFC3339 `@at`, whole-second `@every`, six-field cron with UTC/IANA time zones, source sampling, subject rollup and generated-message TTL. Add optional stream schedule/TTL flags for CREATE and selected UPDATE, verify mode/flags/routes before data, and expose uncertain definition writes without reconnect replay. A definition PubAck is separate from target delivery. See [message schedules](docs/jetstream-schedules.md) for examples and stopping a recurring schedule.
 
 ### Fixed
 
+- Preserve active source/mirror links when updating unrelated stream limits: reject null or contradictory link snapshots in INFO before UPDATE, including missing/replaced members of a nonempty sources list, retain unchanged external configuration without consumer revalidation, and resolve new link checks through the origin API. Apply server-managed WorkQueue/Interest capability checks to domain/imported prefixes as well as the default API.
 - Reject schedule TTL values whose expiration would overflow the server nanosecond clock before sending a definition. Account for the execution time and publication deadline, and reserve a separate documented 60-second target-write lateness window for `@at` TTL checks; bound recurring definitions with generated TTL to a documented 365-day server lifetime. Reject active or malformed `subject_transform` values and streams with `no_ack=true` or an invalid `no_ack` type before schedule publication.
 
 ## [1.3.0] - 2026-11-02

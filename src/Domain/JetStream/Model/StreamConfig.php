@@ -8,6 +8,7 @@ final readonly class StreamConfig
 {
     /**
      * @param list<string> $subjects
+     * @param list<StreamSource>|null $sources
      */
     public function __construct(
         private string $name,
@@ -19,7 +20,19 @@ final readonly class StreamConfig
         private int|null $maxConsumers = null,
         private bool|null $allowMessageSchedules = null,
         private bool|null $allowMessageTtl = null,
+        private StreamSource|null $mirror = null,
+        private array|null $sources = null,
+        private string|null $retention = null,
     ) {
+        if ($sources !== null) {
+            StreamSource::validateList($sources);
+        }
+        if ($mirror !== null && ($subjects !== [] || ($sources !== null && $sources !== []))) {
+            throw new \InvalidArgumentException('Invalid mirror: subjects and sources must be empty');
+        }
+        if ($retention !== null && !in_array($retention, ['limits', 'interest', 'workqueue'], true)) {
+            throw new \InvalidArgumentException('Invalid retention policy');
+        }
         if ($maxConsumers !== null && $maxConsumers < -1) {
             throw new \InvalidArgumentException('Invalid maxConsumers: expected -1 or a nonnegative integer');
         }
@@ -46,6 +59,16 @@ final readonly class StreamConfig
     public function getMaxConsumers(): int|null
     {
         return $this->maxConsumers;
+    }
+
+    public function getMirror(): StreamSource|null
+    {
+        return $this->mirror;
+    }
+    /** @return list<StreamSource>|null */
+    public function getSources(): array|null
+    {
+        return $this->sources;
     }
 
     public function getName(): string
@@ -90,6 +113,15 @@ final readonly class StreamConfig
             }
         }
 
+        if ($this->mirror !== null) {
+            $payload['mirror'] = $this->mirror->toRequestPayload();
+        }
+        if ($this->sources !== null) {
+            $payload['sources'] = array_map(static fn (StreamSource $source): array => $source->toRequestPayload(), $this->sources);
+        }
+        if ($this->retention !== null) {
+            $payload['retention'] = $this->retention;
+        }
         return $payload;
     }
 }

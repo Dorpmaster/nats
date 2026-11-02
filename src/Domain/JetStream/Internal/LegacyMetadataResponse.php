@@ -22,8 +22,10 @@ final class LegacyMetadataResponse
             return $value;
         }
         $fields = match ($path) {
-            '' => ['config', 'state', 'delivered', 'ack_floor', 'cluster'],
-            'config' => ['metadata'],
+            '' => ['config', 'state', 'delivered', 'ack_floor', 'cluster', 'mirror', 'api', 'error'],
+            'config' => ['metadata', 'mirror'],
+            'mirror', 'sources.*' => ['error', 'external'],
+            'config.mirror', 'config.sources.*' => ['consumer', 'external'],
             'cluster' => ['desired'],
             'cluster.desired' => ['origin', 'status'],
             'cluster.desired.origin' => ['placement'],
@@ -35,6 +37,8 @@ final class LegacyMetadataResponse
             $childPath = $path === '' ? (string) $field : $path . '.' . $field;
             if (in_array($field, $fields, true)) {
                 $item = self::object($item, $childPath);
+            } elseif ($field === 'sources' && ($path === '' || $path === 'config') && is_array($item)) {
+                $item = array_map(static fn (mixed $source): mixed => self::object($source, $childPath . '.*'), $item);
             } elseif ($field === 'replicas' && ($path === 'cluster' || $path === 'cluster.desired') && is_array($item)) {
                 $item = array_map(static fn (mixed $peer): mixed => self::object($peer, $childPath), $item);
             }

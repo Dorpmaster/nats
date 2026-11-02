@@ -14,6 +14,9 @@ final readonly class StreamInfo
     private StreamStateInfo|null $state;
     private ClusterInfo|null $cluster;
     private JsonObject|null $metadata;
+    private StreamSourceInfo|null $mirror;
+    /** @var list<StreamSourceInfo>|null */
+    private array|null $sources;
 
     /**
      * @param list<string> $subjects
@@ -25,12 +28,25 @@ final readonly class StreamInfo
         private JsonObject|null $response = null,
     ) {
         $fields          = new MetadataFields($response ?? new JsonObject('{}'), 'stream');
+        $this->mirror    = ($object = $fields->object('mirror')) === null ? null : new StreamSourceInfo($object);
+        $sources         = $fields->objects('sources');
+        $this->sources   = $sources === null ? null : array_map(static fn (JsonObject $source): StreamSourceInfo => new StreamSourceInfo($source), $sources);
         $this->created   = $fields->timestamp('created');
         $this->timestamp = $fields->timestamp('ts');
         $this->domain    = $fields->text('domain');
         $this->state     = ($state = $fields->object('state')) === null ? null : new StreamStateInfo($state);
         $this->cluster   = ($cluster = $fields->object('cluster')) === null ? null : new ClusterInfo($cluster);
         $this->metadata  = (new MetadataFields($configuration ?? new JsonObject('{}'), 'config'))->object('metadata');
+    }
+
+    public function getMirror(): StreamSourceInfo|null
+    {
+        return $this->mirror;
+    }
+    /** @return list<StreamSourceInfo>|null Null means absent, [] is an explicitly empty list. */
+    public function getSources(): array|null
+    {
+        return $this->sources;
     }
 
     public function getConfiguration(): JsonObject|null

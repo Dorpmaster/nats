@@ -66,14 +66,14 @@ final class JetStreamFoundationTest extends TestCase
         // Reference table from the pinned server generations, independent of Feature::minimumApiLevel().
         foreach (
             [
-            [null, [$unknown, $unknown, $unknown, $unknown, $unknown, $unknown]],
-            [0, [$no, $no, $no, $no, $no, $no]],
-            [1, [$no, $no, $no, $no, $no, $no]],
-            [2, [$no, $yes, $no, $no, $yes, $no]],
-            [3, [$no, $yes, $no, $no, $yes, $no]],
-            [4, [$yes, $yes, $yes, $yes, $yes, $yes]],
-            [5, [$yes, $yes, $yes, $yes, $yes, $yes]],
-            [99, [$yes, $yes, $yes, $yes, $yes, $yes]],
+            [null, [$unknown, $unknown, $unknown, $unknown, $unknown, $unknown, $unknown]],
+            [0, [$no, $no, $no, $no, $no, $no, $no]],
+            [1, [$no, $no, $no, $no, $no, $no, $no]],
+            [2, [$no, $yes, $no, $no, $yes, $no, $no]],
+            [3, [$no, $yes, $no, $no, $yes, $no, $no]],
+            [4, [$yes, $yes, $yes, $yes, $yes, $yes, $yes]],
+            [5, [$yes, $yes, $yes, $yes, $yes, $yes, $yes]],
+            [99, [$yes, $yes, $yes, $yes, $yes, $yes, $yes]],
             ] as [$level, $states]
         ) {
             foreach (Feature::cases() as $index => $feature) {

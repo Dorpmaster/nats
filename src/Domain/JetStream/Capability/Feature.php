@@ -12,6 +12,7 @@ enum Feature: string
     case FAST_BATCH_PUBLISH        = 'fast_batch_publish';
     case MESSAGE_SCHEDULE_AT       = 'message_schedule_at';
     case MESSAGE_SCHEDULE_EXTENDED = 'message_schedule_extended';
+    case DURABLE_SOURCING          = 'durable_sourcing';
 
     public function minimumApiLevel(): int
     {
@@ -19,7 +20,7 @@ enum Feature: string
         // phpcs:ignore PHPCompatibility.Variables.ForbiddenThisUseContexts.OutsideObjectContext
         return match ($this) {
             self::ATOMIC_PUBLISH, self::MESSAGE_SCHEDULE_AT => 2,
-            self::CONSUMER_RESET, self::ATOMIC_EOB, self::FAST_BATCH_PUBLISH, self::MESSAGE_SCHEDULE_EXTENDED => 4,
+            self::CONSUMER_RESET, self::ATOMIC_EOB, self::FAST_BATCH_PUBLISH, self::MESSAGE_SCHEDULE_EXTENDED, self::DURABLE_SOURCING => 4,
         };
     }
 }

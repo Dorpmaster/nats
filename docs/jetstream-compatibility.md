@@ -85,3 +85,7 @@ level 4 for intervals, cron/time zones, source sampling or scheduled rollup.
 Typed publication verifies the current target and flags before writing; see
 [message schedules](jetstream-schedules.md). Existing batch/reset thresholds
 remain unchanged.
+
+### Sources and mirrors (1.4.0)
+
+`Feature::DURABLE_SOURCING` requires API level 4 for explicitly provided consumers and flow_control ACK. Basic Limits sources/mirrors work on 2.12.6; NATS-managed durable sourcing for WorkQueue/Interest requires 2.14+. [Admission and ownership](jetstream-sources.md).

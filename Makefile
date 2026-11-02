@@ -438,3 +438,15 @@ integration-jetstream-fast-cluster: build
 .PHONY: integration-jetstream-schedules
 integration-jetstream-schedules: build
 	python3 tests/Support/run-jetstream-schedules.py
+
+.PHONY: integration-jetstream-sources
+integration-jetstream-sources: build
+	python3 tests/Support/run-jetstream-sources.py
+
+.PHONY: integration-jetstream-sources-cluster
+integration-jetstream-sources-cluster: build
+	python3 tests/Support/run-jetstream-sources.py --cluster
+
+.PHONY: integration-jetstream-sources-external
+integration-jetstream-sources-external: build
+	python3 tests/Support/run-jetstream-sources-external.py
