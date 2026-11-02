@@ -103,3 +103,17 @@ observers remain on one connection generation. The four placement commands are
 rejected through ordinary replayable transport methods. Separate convergence
 checks and rollback instance identity are described in
 [replica placement](jetstream-placement.md).
+
+## V2 archives (1.4.0)
+
+`Feature::STREAM_BACKUP_V2` requires API level 5. Archive operations additionally
+read account INFO through the selected API prefix on the original connection,
+require its numeric `api.level >= 5`, and send `Nats-Required-Api-Level: 5`
+on INFO and the actual SNAPSHOT/RESTORE start request. An unsupported or unproven
+target cannot start V2. No `format` or `version` property is added to the request.
+See [V2 backup/recovery](jetstream-backup.md). The optional connection snapshot
+appends `maxPayload` with a null default; older implementations remain compatible,
+but cannot provide archive transfer without a proven payload bound and the
+connection-bound lossless protocol-channel capability
+(`ConnectionBoundProtocolClientInterface`); ordinary streaming-only clients
+are not assumed lossless.

@@ -189,6 +189,17 @@ final class FakeNatsProtocolServer
         $this->sessions[$sessionIndex]->socket->write((string) new MsgMessage($subject, $sid, $payload));
     }
 
+    public function sendArchiveMessage(int $sessionIndex, string $subject, string $sid, string $payload, string|null $reply = null): void
+    {
+        $this->sessions[$sessionIndex]->socket->write((string) new MsgMessage($subject, $sid, $payload, $reply));
+    }
+
+    public function sendArchiveStatus(int $sessionIndex, string $subject, string $sid, int $status): void
+    {
+        $message = new \Dorpmaster\Nats\Protocol\HMsgMessage($subject, $sid, '', new \Dorpmaster\Nats\Protocol\Header\HeaderBag(), status: new \Dorpmaster\Nats\Protocol\MessageStatus($status, 'Synthetic archive status'));
+        $this->sessions[$sessionIndex]->socket->write((string) $message);
+    }
+
     private function handleClient(FakeNatsSessionState $session): void
     {
         $buffer              = '';

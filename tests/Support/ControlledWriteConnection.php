@@ -17,7 +17,7 @@ final class ControlledWriteConnection implements ConnectionInterface
     /** @param Closure(NatsProtocolMessageInterface, int):void|null $before
      * @param Closure(NatsProtocolMessageInterface, int):void|null $after
      */
-    public function __construct(private ConnectionInterface $inner, private Closure|null $before = null, private Closure|null $after = null)
+    public function __construct(private ConnectionInterface $inner, private Closure|null $before = null, private Closure|null $after = null, private Closure|null $onReceive = null)
     {
     }
 
@@ -39,7 +39,14 @@ final class ControlledWriteConnection implements ConnectionInterface
 
     public function receive(Cancellation|null $cancellation = null): NatsProtocolMessageInterface|null
     {
-        return $this->inner->receive($cancellation);
+        $message = $this->inner->receive($cancellation);
+        if ($message !== null) {
+            $replacement = $this->onReceive?->__invoke($message, $this->session);
+            if ($replacement instanceof NatsProtocolMessageInterface) {
+                $message = $replacement;
+            }
+        }
+        return $message;
     }
 
     public function send(NatsProtocolMessageInterface $message): void

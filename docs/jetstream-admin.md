@@ -296,3 +296,10 @@ The optional `JetStreamPlacementAdminInterface` adds explicit cancellation and
 evacuation, with separate INFO-only observation of completion. See
 [replica placement](jetstream-placement.md) for API level 5 admission, rollback
 semantics, system-account scope and uncertain results.
+
+## Streaming backup and recovery (1.4.0)
+
+The optional `JetStreamBackupAdminInterface` adds `backupStream()` and
+`restoreStream()` without changing `JetStreamAdminInterface`. See
+[V2 backup and recovery](jetstream-backup.md) for stream ownership, exact
+metadata persistence, deadlines, consumer recovery and uncertain outcomes.

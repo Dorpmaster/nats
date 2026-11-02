@@ -32,22 +32,22 @@ final class JetStreamPlacementFixture
     private bool $created = false;
 
     /** @param \Closure(\Dorpmaster\Nats\Protocol\Contracts\NatsProtocolMessageInterface,int):void|null $onSend */
-    public function __construct(string $account = 'A', string $prefix = '$JS.API', \Closure|null $onSend = null)
+    public function __construct(string $account = 'A', string $prefix = '$JS.API', \Closure|null $onSend = null, \Closure|null $onReceive = null, ClientConfiguration|null $configuration = null, int|null $pendingBytesLimit = 2_000_000, \Dorpmaster\Nats\Client\SlowConsumerPolicy $slowConsumerPolicy = \Dorpmaster\Nats\Client\SlowConsumerPolicy::ERROR)
     {
-        $this->logs    = new RecordingLogger();
-        $storage       = new SubscriptionStorage();
-        $cluster       = getenv('NATS_RESET_CLUSTER') === '1';
-        $configuration = $cluster ? new ClientConfiguration(reconnectEnabled: true, maxReconnectAttempts: 30, reconnectBackoffInitialMs: 20, reconnectBackoffMaxMs: 100, reconnectJitterFraction: 0.0, servers: NatsJetStreamClusterHarness::getSeedServers()) : new ClientConfiguration();
-        $connection    = new Connection(new DnsSocketConnector(), new ConnectionConfiguration(NatsServerHarness::host(), NatsServerHarness::port()), $this->logs);
-        if ($onSend !== null) {
-            $connection = new ControlledWriteConnection($connection, after: $onSend);
+        $this->logs      = new RecordingLogger();
+        $storage         = new SubscriptionStorage();
+        $cluster         = getenv('NATS_RESET_CLUSTER') === '1';
+        $configuration ??= $cluster ? new ClientConfiguration(reconnectEnabled: true, maxReconnectAttempts: 30, reconnectBackoffInitialMs: 20, reconnectBackoffMaxMs: 100, reconnectJitterFraction: 0.0, servers: NatsJetStreamClusterHarness::getSeedServers()) : new ClientConfiguration();
+        $connection      = new Connection(new DnsSocketConnector(), new ConnectionConfiguration(NatsServerHarness::host(), NatsServerHarness::port()), $this->logs);
+        if ($onSend !== null || $onReceive !== null) {
+            $connection = new ControlledWriteConnection($connection, after: $onSend, onReceive: $onReceive);
         }
         $this->client    = new Client(
             configuration: $configuration,
             cancellation: new NullCancellation(),
             connection: $connection,
             eventDispatcher: new EventDispatcher(),
-            messageDispatcher: new MessageDispatcher(new ConnectInfo(false, false, false, 'php', PHP_VERSION, user: strtolower($account), pass: 'synthetic-n8-' . strtolower($account), headers: true, protocol: 1), $storage, $this->logs),
+            messageDispatcher: new MessageDispatcher(new ConnectInfo(false, false, false, 'php', PHP_VERSION, user: strtolower($account), pass: 'synthetic-n8-' . strtolower($account), headers: true, protocol: 1), $storage, $this->logs, slowConsumerPolicy: $slowConsumerPolicy, maxPendingBytesPerSubscription: $pendingBytesLimit),
             storage: $storage,
             logger: $this->logs,
         );
@@ -94,7 +94,13 @@ final class JetStreamPlacementFixture
     {
         try {
             if ($this->created && $this->client->getState() !== \Dorpmaster\Nats\Domain\Client\ClientState::CLOSED) {
-                $this->admin->deleteStream($this->stream);
+                try {
+                    $this->admin->deleteStream($this->stream);
+                } catch (\Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException $error) {
+                    if ($error->getApiCode() !== 404) {
+                        throw $error;
+                    }
+                }
             }
         } finally {
             $this->client->disconnect();

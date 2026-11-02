@@ -34,7 +34,7 @@ use JsonException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
-final readonly class JetStreamAdmin implements JetStreamPlacementAdminInterface, JetStreamUpdatingAdminInterface, JetStreamResettingAdminInterface, JetStreamCapabilitiesProviderInterface
+final readonly class JetStreamAdmin implements JetStreamBackupAdminInterface, JetStreamPlacementAdminInterface, JetStreamUpdatingAdminInterface, JetStreamResettingAdminInterface, JetStreamCapabilitiesProviderInterface
 {
     public function __construct(
         private JetStreamControlPlaneTransportInterface $transport,
@@ -47,6 +47,28 @@ final readonly class JetStreamAdmin implements JetStreamPlacementAdminInterface,
         return $this->transport instanceof JetStreamCapabilitiesProviderInterface
             ? $this->transport->getCapabilities()
             : new JetStreamCapabilities(new \Dorpmaster\Nats\Domain\Client\ServerInformation());
+    }
+
+    private function archives(): \Dorpmaster\Nats\Domain\JetStream\Backup\ArchiveOperations
+    {
+        return new \Dorpmaster\Nats\Domain\JetStream\Backup\ArchiveOperations($this->transport, $this->getLogger(), fn (JsonObject $raw): StreamInfo => $this->mapStreamInfo($raw));
+    }
+    public function backupStream(mixed $stream, \Amp\ByteStream\WritableStream $output, \Dorpmaster\Nats\Domain\JetStream\Backup\BackupOptions|null $options = null, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Backup\StreamBackupMetadata
+    {
+        if (!is_string($stream)) {
+            throw new InvalidArgumentException('Invalid stream: expected string');
+        }
+        return $this->archives()->backup($stream, $output, $options ?? new \Dorpmaster\Nats\Domain\JetStream\Backup\BackupOptions(), $timeoutMs, $cancellation);
+    }
+    public function restoreStream(mixed $destination, \Amp\ByteStream\ReadableStream $input, \Dorpmaster\Nats\Domain\JetStream\Backup\StreamBackupMetadata $backup, mixed $storage, \Dorpmaster\Nats\Domain\JetStream\Backup\RestoreOptions|null $options = null, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        if (!is_string($destination)) {
+            throw new InvalidArgumentException('Invalid destination: expected string');
+        }
+        if (!is_string($storage)) {
+            throw new InvalidArgumentException('Invalid storage: expected file or memory');
+        }
+        return $this->archives()->restore($destination, $input, $backup, $storage, $options ?? new \Dorpmaster\Nats\Domain\JetStream\Backup\RestoreOptions(), $timeoutMs, $cancellation);
     }
 
     private function placement(): \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations
@@ -436,13 +458,7 @@ final readonly class JetStreamAdmin implements JetStreamPlacementAdminInterface,
             if ($name === null || $name === '') {
                 throw new JetStreamApiException(0, 'JetStream stream response does not contain valid stream name');
             }
-            // This schema requires strings: never let JSON_BIGINT_AS_STRING disguise numeric elements.
-            $subjects = $configuration->has('subjects')
-                ? json_decode($configuration->getRawValue('subjects'), false, 512, JSON_THROW_ON_ERROR)
-                : [];
-            if (!is_array($subjects) || !array_is_list($subjects) || array_filter($subjects, static fn (mixed $subject): bool => !is_string($subject)) !== []) {
-                throw new JetStreamApiException(0, 'JetStream stream response contains invalid subjects list');
-            }
+            $subjects = \Dorpmaster\Nats\Domain\JetStream\Internal\StreamSubjects::read($configuration);
             return new StreamInfo($name, $subjects, $configuration, $raw);
         } catch (InvalidArgumentException | JsonException $error) {
             throw new JetStreamApiException(0, 'Invalid JetStream stream metadata: ' . $error->getMessage(), $error);

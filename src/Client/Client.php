@@ -64,7 +64,7 @@ use Throwable;
 
 use function Amp\delay;
 
-final class Client implements ClientInterface, ServerInformationProviderInterface, ConnectionBoundRequestClientInterface, \Dorpmaster\Nats\Domain\Client\ConnectionBoundPublishClientInterface
+final class Client implements \Dorpmaster\Nats\Domain\Client\ConnectionBoundProtocolClientInterface, ClientInterface, ServerInformationProviderInterface, ConnectionBoundRequestClientInterface, \Dorpmaster\Nats\Domain\Client\ConnectionBoundPublishClientInterface
 {
     private const string STATUS_EVENT_NAME = 'connectionStatusChanged';
 
@@ -85,6 +85,8 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
     private bool $replaySubscriptionsOnReady                        = false;
     /** @var array<string, array{subject: string, queueGroup: string|null}> */
     private array $subscriptionsBySid = [];
+    /** @var array<string, array{message:Closure,failure:Closure,generation:int}> */
+    private array $protocolSubscriptionsBySid = [];
     private readonly SubscriptionIdHelperInterface $subscriptionIdHelper;
     private readonly ReconnectBackoffServiceInterface $reconnectBackoffService;
     private readonly WriteBufferInterface $writeBuffer;
@@ -279,6 +281,18 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
 
                     if (in_array($message->getType(), [NatsMessageType::MSG, NatsMessageType::HMSG], true)) {
                         assert($message instanceof MsgMessageInterface || $message instanceof HMsgMessageInterface);
+                        // Private protocol channels have their own bounded FIFO and cannot use a lossy application policy.
+                        $protocol = $this->protocolSubscriptionsBySid[$message->getSid()] ?? null;
+                        if ($protocol !== null) {
+                            if ($protocol['generation'] === $this->connectionGeneration) {
+                                try {
+                                    ($protocol['message'])($message);
+                                } catch (Throwable $error) {
+                                    ($protocol['failure'])($error);
+                                }
+                            }
+                            continue;
+                        }
                         $this->inboundDispatchScheduler->dispatch($message, function () use ($message): void {
                             $response = $this->messageDispatcher->dispatch($message);
                             if (
@@ -438,7 +452,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         return $this->subscribeInternal($subject, $closure, $queueGroup);
     }
 
-    private function subscribeInternal(string $subject, Closure $closure, string|null $queueGroup = null, RequestLifetime|null $request = null): string
+    private function subscribeInternal(string $subject, Closure $closure, string|null $queueGroup = null, RequestLifetime|null $request = null, Closure|null $protocolFailure = null): string
     {
         $sid     = $this->subscriptionIdHelper->generateId();
         $message = new SubMessage($subject, $sid, $queueGroup);
@@ -453,6 +467,9 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
             'subject' => $subject,
             'queueGroup' => $queueGroup,
         ];
+        if ($protocolFailure !== null) {
+            $this->protocolSubscriptionsBySid[$sid] = ['message' => $closure, 'failure' => $protocolFailure, 'generation' => $this->connectionGeneration];
+        }
         $this->logger?->debug('Subscription saved to storage');
 
         try {
@@ -468,7 +485,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
             ]);
 
             $this->storage->remove($sid);
-            unset($this->subscriptionsBySid[$sid]);
+            unset($this->subscriptionsBySid[$sid], $this->protocolSubscriptionsBySid[$sid]);
 
             throw $exception;
         }
@@ -484,7 +501,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
     {
         $message = new UnSubMessage($sid);
         $this->storage->remove($sid);
-        unset($this->subscriptionsBySid[$sid]);
+        unset($this->subscriptionsBySid[$sid], $this->protocolSubscriptionsBySid[$sid]);
 
         try {
             if ($this->status === ClientState::DRAINING && !$this->connection->isClosed()) {
@@ -554,7 +571,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
                 throw new \InvalidArgumentException('Invalid timeout: expected a positive finite duration');
             }
             $scope = new CompositeCancellation($this->connectionRequests->getCancellation(), $cancellation ?? new NullCancellation());
-            return $this->performRequest($message, $timeout, true, $scope);
+            return $this->performRequest($message, $timeout, true, $scope, $connectionId);
         } catch (ConnectionBoundRequestException $error) {
             throw $error;
         } catch (Throwable $error) {
@@ -565,6 +582,16 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
 
     public function openPublishChannelOnConnection(string $inbox, Closure $onMessage, Closure $onFailure, int $connectionId, Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\Client\PublishChannelInterface
     {
+        return $this->openPrivateChannel($inbox, $onMessage, $onFailure, $connectionId, $cancellation, false);
+    }
+
+    public function openProtocolChannelOnConnection(string $inbox, Closure $onMessage, Closure $onFailure, int $connectionId, Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\Client\PublishChannelInterface
+    {
+        return $this->openPrivateChannel($inbox, $onMessage, $onFailure, $connectionId, $cancellation, true);
+    }
+
+    private function openPrivateChannel(string $inbox, Closure $onMessage, Closure $onFailure, int $connectionId, Cancellation|null $cancellation, bool $protocol): \Dorpmaster\Nats\Domain\Client\PublishChannelInterface
+    {
         if (
             $this->status !== ClientState::CONNECTED || !$this->handshakeReady || $this->connection->isClosed()
             || $connectionId !== $this->connectionGeneration || $this->connectionRequests === null
@@ -572,18 +599,37 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
         ) {
             throw new ConnectionBoundRequestException(false, new ConnectionException('The original ready connection is unavailable'));
         }
-        $scope = new CompositeCancellation($this->cancellation, $this->connectionRequests->getCancellation(), $cancellation ?? new NullCancellation());
-        return new PublishChannel(
+        $scope          = new CompositeCancellation($this->cancellation, $this->connectionRequests->getCancellation(), $cancellation ?? new NullCancellation());
+        $channel        = null;
+        $reportFailure  = function (Throwable $error) use ($onFailure, &$channel): void {
+            try {
+                $onFailure($error);
+            } finally {
+                $channel?->close();
+            }
+        };
+        return $channel = new PublishChannel(
             $scope,
-            fn (Closure $handler, RequestLifetime $lifetime): string => $this->subscribeInternal($inbox, $handler, request: $lifetime),
+            fn (Closure $handler, RequestLifetime $lifetime): string => $this->subscribeInternal($inbox, $handler, request: $lifetime, protocolFailure: $protocol ? $reportFailure : null),
             fn ($message, RequestLifetime $lifetime) => $this->enqueueOutbound($message, request: $lifetime),
-            fn (string $sid) => $this->unsubscribe($sid),
+            fn (string $sid) => $this->unsubscribeOnConnection($sid, $connectionId),
             $onMessage,
-            $onFailure,
+            $reportFailure,
         );
     }
 
-    private function performRequest(PubMessageInterface|HPubMessageInterface $message, float $timeout, bool $once, Cancellation|null $scope = null): MsgMessageInterface|HMsgMessageInterface
+    private function unsubscribeOnConnection(string $sid, int $connectionId): void
+    {
+        $this->storage->remove($sid);
+        unset($this->subscriptionsBySid[$sid], $this->protocolSubscriptionsBySid[$sid]);
+        if ($this->status !== ClientState::CONNECTED || $this->connectionGeneration !== $connectionId || $this->connection->isClosed() || $this->connectionRequests === null) {
+            return;
+        }
+        $lifetime = new RequestLifetime(null, $this->connectionRequests->getCancellation(), static fn () => null);
+        $this->enqueueOutbound(new UnSubMessage($sid), request: $lifetime);
+    }
+
+    private function performRequest(PubMessageInterface|HPubMessageInterface $message, float $timeout, bool $once, Cancellation|null $scope = null, int|null $boundConnectionId = null): MsgMessageInterface|HMsgMessageInterface
     {
         if (in_array($this->status, [ClientState::DRAINING, ClientState::CLOSED], true)) {
             throw new ConnectionException(sprintf('Could not request while client state is %s', $this->status->value));
@@ -659,7 +705,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
             $inboxLifetime?->finish();
             if (isset($sid) === true) {
                 try {
-                    $this->unsubscribe($sid);
+                    $boundConnectionId === null ? $this->unsubscribe($sid) : $this->unsubscribeOnConnection($sid, $boundConnectionId);
                 } catch (Throwable $exception) {
                     $this->logger?->debug('Ignoring request cleanup unsubscribe failure', [
                         'sid' => $sid,
@@ -1164,6 +1210,7 @@ final class Client implements ClientInterface, ServerInformationProviderInterfac
             jetStream: $info?->jetstream,
             apiLevel: $info?->api_lvl,
             connectionId: $info === null ? null : $generation,
+            maxPayload: $info?->max_payload,
             isCurrent: fn (): bool => $info !== null
                 && $this->serverInformation !== null
                 && $this->status === ClientState::CONNECTED

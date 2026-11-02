@@ -462,3 +462,13 @@ integration-jetstream-placement-cluster: build
 .PHONY: integration-jetstream-placement-tcp
 integration-jetstream-placement-tcp: build
 	docker run --rm nats-client vendor/bin/phpunit --fail-on-skipped tests/Integration/JetStreamPlacementWriteConformanceTest.php
+
+.PHONY: integration-jetstream-backup integration-jetstream-backup-cluster integration-jetstream-backup-tcp
+integration-jetstream-backup: build
+	python3 tests/Support/run-jetstream-archive.py
+
+integration-jetstream-backup-cluster: build
+	python3 tests/Support/run-jetstream-archive.py --cluster
+
+integration-jetstream-backup-tcp: build
+	docker run --rm nats-client vendor/bin/phpunit --fail-on-skipped tests/Integration/JetStreamArchiveWriteConformanceTest.php
