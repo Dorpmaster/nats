@@ -39,6 +39,7 @@ for `api_lvl`.
 | `ATOMIC_PUBLISH` | 2 | [NATS 2.12.6 versioning](https://github.com/nats-io/nats-server/blob/v2.12.6/server/jetstream_versioning.go): atomic publishing requires level 2 |
 | `CONSUMER_RESET` | 4 | [NATS 2.14.0 API](https://github.com/nats-io/nats-server/blob/v2.14.0/server/jetstream_api.go): RESET subject/response; [consumer handler](https://github.com/nats-io/nats-server/blob/v2.14.0/server/consumer.go); [versioning](https://github.com/nats-io/nats-server/blob/v2.14.0/server/jetstream_versioning.go): server level 4; endpoint absent in 2.12.6 |
 | `ATOMIC_EOB` | 4 | [NATS 2.14.0 stream](https://github.com/nats-io/nats-server/blob/v2.14.0/server/stream.go): `Nats-Batch-Commit: eob`; absent from atomic commit handling in [2.12.6](https://github.com/nats-io/nats-server/blob/v2.12.6/server/stream.go) |
+| `PLACEMENT_MANAGEMENT` | 5 | [NATS 2.15.2 API](https://github.com/nats-io/nats-server/blob/v2.15.2/server/jetstream_api.go): stream cancel/peer evacuate, consumer peer evacuate and system server evacuate |
 | `FAST_BATCH_PUBLISH` | 4 | [NATS 2.14.0 versioning](https://github.com/nats-io/nats-server/blob/v2.14.0/server/jetstream_versioning.go): `AllowBatchPublish` requires level 4 |
 
 Fixed integration versions advertise levels 3 (2.12.6), 4 (2.14.0), and 5
@@ -89,3 +90,16 @@ remain unchanged.
 ### Sources and mirrors (1.4.0)
 
 `Feature::DURABLE_SOURCING` requires API level 4 for explicitly provided consumers and flow_control ACK. Basic Limits sources/mirrors work on 2.12.6; NATS-managed durable sourcing for WorkQueue/Interest requires 2.14+. [Admission and ownership](jetstream-sources.md).
+
+## Replica placement (1.4.0)
+
+`JetStreamPlacementAdminInterface` and
+`JetStreamConnectionBoundTransportInterface::requestJsonOnConnection()` are
+optional additions. Existing Admin and transport implementations retain their
+contracts. Placement commands and bounded observers require the new tracked transport capability;
+legacy CRUD, UPDATE and RESET keep their previous requirements. Actual target
+admission requires the native default API route and complete ingress/account diagnostics;
+observers remain on one connection generation. The four placement commands are
+rejected through ordinary replayable transport methods. Separate convergence
+checks and rollback instance identity are described in
+[replica placement](jetstream-placement.md).

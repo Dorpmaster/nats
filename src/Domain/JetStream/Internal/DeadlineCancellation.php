@@ -14,7 +14,7 @@ use Closure;
 final readonly class DeadlineCancellation implements Cancellation
 {
     private TimeoutCancellation $timer;
-    public function __construct(private float $deadline)
+    public function __construct(private int|float $deadline, private string $message = 'Scheduled publication deadline expired')
     {
         $this->timer = new TimeoutCancellation(max(.000001, ($deadline - hrtime(true)) / 1000000000));
     }
@@ -33,7 +33,7 @@ final readonly class DeadlineCancellation implements Cancellation
     public function throwIfRequested(): void
     {
         if (hrtime(true) >= $this->deadline) {
-            throw new CancelledException(new TimeoutException('Scheduled publication deadline expired'));
+            throw new CancelledException(new TimeoutException($this->message));
         }
         $this->timer->throwIfRequested();
     }

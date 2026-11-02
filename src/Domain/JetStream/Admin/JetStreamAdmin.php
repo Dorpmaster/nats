@@ -34,7 +34,7 @@ use JsonException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
-final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, JetStreamResettingAdminInterface, JetStreamCapabilitiesProviderInterface
+final readonly class JetStreamAdmin implements JetStreamPlacementAdminInterface, JetStreamUpdatingAdminInterface, JetStreamResettingAdminInterface, JetStreamCapabilitiesProviderInterface
 {
     public function __construct(
         private JetStreamControlPlaneTransportInterface $transport,
@@ -47,6 +47,49 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         return $this->transport instanceof JetStreamCapabilitiesProviderInterface
             ? $this->transport->getCapabilities()
             : new JetStreamCapabilities(new \Dorpmaster\Nats\Domain\Client\ServerInformation());
+    }
+
+    private function placement(): \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations
+    {
+        return new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations($this->transport, $this->getLogger(), fn (JsonObject $raw): StreamInfo => $this->mapStreamInfo($raw), fn (JsonObject $raw): ConsumerInfo => $this->mapConsumerInfo($raw));
+    }
+    public function cancelStreamMove(mixed $stream, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        $stream = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($stream, 'stream');
+        return $this->placement()->execute('stream_cancel_move', ['stream' => $stream], $timeoutMs, $cancellation);
+    }
+    public function evacuateStreamPeer(mixed $stream, mixed $peer, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Model\PlacementAck
+    {
+        $stream = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($stream, 'stream');
+        \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::peer($peer);
+        return $this->placement()->execute('stream_peer_evacuate', ['stream' => $stream,'peer' => $peer], $timeoutMs, $cancellation);
+    }
+    public function evacuateConsumerPeer(mixed $stream, mixed $consumer, mixed $peer, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Model\PlacementAck
+    {
+        $stream   = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($stream, 'stream');
+        $consumer = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($consumer, 'consumer');
+        \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::peer($peer);
+        return $this->placement()->execute('consumer_peer_evacuate', ['stream' => $stream,'consumer' => $consumer,'peer' => $peer], $timeoutMs, $cancellation);
+    }
+    public function evacuateServer(mixed $peer = null, mixed $peerId = null, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Model\PlacementAck
+    {
+        if (($peer === null) === ($peerId === null)) {
+            throw new InvalidArgumentException('Specify exactly one of peer or peerId');
+        }
+        \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::peer($peer ?? $peerId, $peer === null ? 'peerId' : 'peer');
+        return $this->placement()->execute('server_evacuate', $peer === null ? ['peer_id' => $peerId] : ['peer' => $peer], $timeoutMs, $cancellation);
+    }
+    public function waitForStreamEvacuation(string $stream, string $peerName, int $expectedReplicas, int|null $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        return (new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementObserver($this->placement()))->evacuate($stream, null, $peerName, $expectedReplicas, $timeoutMs, $cancellation);
+    }
+    public function waitForConsumerEvacuation(string $stream, string $consumer, string $peerName, int $expectedReplicas, int|null $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): ConsumerInfo
+    {
+        return (new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementObserver($this->placement()))->evacuate($stream, $consumer, $peerName, $expectedReplicas, $timeoutMs, $cancellation);
+    }
+    public function waitForStreamRollback(StreamInfo $transition, StreamInfo $original, int|null $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        return (new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementObserver($this->placement()))->rollback($transition, $original, $timeoutMs, $cancellation);
     }
 
     public function createStream(StreamConfig $config): StreamInfo

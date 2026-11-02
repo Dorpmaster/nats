@@ -289,3 +289,10 @@ Local and domain-prefixed RESET work on 2.14.0; the same import roundtrip works 
 ## Sources and mirrors (1.4.0)
 
 See [typed sources, mirrors and consumer ownership](jetstream-sources.md) for configuration, API level checks, update/removal, actual link state and independent delivery verification.
+
+## Replica placement (1.4.0)
+
+The optional `JetStreamPlacementAdminInterface` adds explicit cancellation and
+evacuation, with separate INFO-only observation of completion. See
+[replica placement](jetstream-placement.md) for API level 5 admission, rollback
+semantics, system-account scope and uncertain results.

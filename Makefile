@@ -450,3 +450,15 @@ integration-jetstream-sources-cluster: build
 .PHONY: integration-jetstream-sources-external
 integration-jetstream-sources-external: build
 	python3 tests/Support/run-jetstream-sources-external.py
+
+.PHONY: integration-jetstream-placement
+integration-jetstream-placement: build
+	python3 tests/Support/run-jetstream-placement.py
+
+.PHONY: integration-jetstream-placement-cluster
+integration-jetstream-placement-cluster: build
+	python3 tests/Support/run-jetstream-placement.py --cluster
+
+.PHONY: integration-jetstream-placement-tcp
+integration-jetstream-placement-tcp: build
+	docker run --rm nats-client vendor/bin/phpunit --fail-on-skipped tests/Integration/JetStreamPlacementWriteConformanceTest.php
