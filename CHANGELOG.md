@@ -2,66 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.3.0] - Unreleased
+## [1.3.0] - 2026-11-02
 
 ### Added
 
-- Add optional streaming JetStream fast batches (API level 4, `allow_batched`) with dynamic cumulative flow control, bounded message/byte credit, exact UInt64 progress, bounded ACK recovery, partial/unknown results, cancellation and connection-bound single-attempt writes. Preserve repeated headers and binary payloads without retaining the complete input stream.
-
-- Add optional atomic JetStream batch publishing with frozen message/header snapshots, ordinary and eob commit modes, exact UInt64 acknowledgements, one deadline, isolated cancellation and a connection-bound single-attempt lifetime. Report uncertain commit outcomes with the batch ID instead of continuing or replaying a batch after reconnect.
-
-- Add optional single-attempt consumer RESET with exact UInt64 stream positions, ACK-floor default, confirmed reset position and immutable ConsumerInfo from the same response. Validate names, deadlines, capability support and response identity without changing existing Admin interfaces or replaying uncertain/expired requests.
-
-- Add optional JetStream ACK metadata and complete repeated-header views for fetch/consume, exact decimal counters and nanosecond timestamps, immutable stream/consumer state and raw configuration/response snapshots, and separate current/desired cluster and peer models. Preserve legacy getters, acknowledgement subjects, DROP_NEW and single-attempt UPDATE behavior.
-
-- Add optional JetStream server capability contracts based on current-transport INFO `api_lvl`, configurable API prefixes, server `err_code` access, nullable atomic/batched publishing and consumer-limit stream options, and selected-field stream UPDATE with exact JSON configuration preservation and one operation deadline. Existing interfaces, constructors and dependency floors remain compatible.
-
-### Fixed
-
-- Retain the fast batch reply inbox during server-error settlement: withdraw queued EOB/ping without closing the channel, wait for the final prefix acknowledgement within the original deadline, and preserve already confirmed progress when the final reply is lost.
-
-- Enforce fast batch deadlines synchronously before operations and queued writes, require admission before session construction, withdraw queued EOB/ping on cancellation, and accept deduplicated final acknowledgements with zero stream sequence.
-
-- Isolate the reader loop of each explicit client connection so a delayed EOF from a previous connection cannot close a freshly reconnected transport.
-
-- Preserve numeric JSON mapping names when checking atomic publish routes; unrelated numeric subjects no longer block batches, while matching mappings remain rejected and `0` stays distinct from `00`.
-
-- Require live server/account monitoring to certify an isolated atomic publish route across every cluster peer, rejecting matching mappings/imports/exports and leaf/gateway exits before any batch HPUB. Fail closed when diagnostic access or topology proof is unavailable. Treat generic JSON errors without a JetStream-specific code, JSON 408 and intermediary HMSG errors after attempted commit as uncertain, retaining batch identity, codes and causes.
-
-- Parse empty MSG payloads without asking the byte parser to read zero bytes; validate the trailing CRLF and preserve subsequent frames across fragmented input.
-
-- Reject original float/bool consumer RESET positions before PHP scalar coercion in either caller mode, and reject contradictory or non-string `config.name` in RESET confirmations. Preserve exact valid request tokens and the single-attempt lifetime.
-
-- Validate JSON string types for every stream subject and reject null before UPDATE, restore known object shapes for legacy array-only Admin transports, and validate textual metadata against raw JSON token types, including integers beyond PHP int.
-
-- Stream UPDATE requests use a cancellable single-attempt queue lifetime: uncertain writes are never replayed after reconnect, and expired or cancelled unsent frames are withdrawn. Ordinary publication replay is unchanged.
-
-## [1.2.1] - Unreleased
+- JetStream capability checks based on the current connection's `INFO.api_lvl`, configurable Admin API prefixes, structured server `err_code` access, and optional stream settings for atomic/batched publication and consumer limits. `updateStream()` patches selected fields while preserving the rest of the stream configuration, including exact JSON values.
+- Exact JetStream message metadata and immutable Stream/Consumer Info snapshots: decimal counters and sequences, nanosecond timestamps, repeated header values, and separate current and desired cluster/replica information.
+- `resetConsumer()` to resume from the stream ACK floor plus one or an explicit UInt64 stream sequence, returning the server-confirmed reset position and Consumer Info. RESET and UPDATE use single-attempt requests that are not replayed after reconnect; a timeout may require checking server state before retrying.
+- `publishAtomicBatch()` to commit an ordered batch to one stream as a whole, with ordinary message commit or a separate EOB marker. Lost commit confirmation exposes the batch ID and an unknown-outcome flag. Publication requires confirmed server/stream support, diagnostic access and a verified route before any batch data is sent.
+- `openFastBatch()` for streaming publication with bounded message/byte credit and cumulative acknowledgements. Messages can be visible before completion. Partial failures report the confirmed prefix, problem index and unknown message ranges; final acknowledgements settle that prefix, including fully deduplicated batches. Unsent frames are withdrawn on cancellation, expiry or server refusal, and the batch is not replayed after reconnect.
 
 ### Changed
 
-- Raised the minimum `amphp/byte-stream` version to `2.1.3` (`^2.1.3`, allowing `>=2.1.3 <3.0.0`) to prevent stalled TLS reads with non-select event-loop drivers and report an error when writing to a disconnected peer makes `fwrite()` return zero bytes. See the [AMPHP Byte Stream 2.1.3 release notes](https://github.com/amphp/byte-stream/releases/tag/v2.1.3).
+- Raised the minimum `amphp/byte-stream` version to `2.1.3` (`^2.1.3`, allowing `>=2.1.3 <3.0.0`) to prevent stalled TLS reads with non-select event-loop drivers and report an error when writing to a disconnected peer makes `fwrite()` return zero bytes. See the [AMPHP Byte Stream 2.1.3 release notes](https://github.com/amphp/byte-stream/releases/tag/v2.1.3). PHP remains `^8.5`; other dependency and extension requirements are unchanged. Applications locking `amphp/byte-stream` to `2.1.2` or earlier must update it together with the driver when upgrading to `1.3.0`.
+
+### Security
+
+- Prevent NATS command injection through outgoing protocol fields. Validate JetStream resource names before requests or inbox creation and reject unsafe PUB/HPUB subjects and reply-to values, plus SUB/UNSUB subject, SID and queue-group fields where used, including trailing newlines. Valid JetStream names such as `ORDERS@EU`, `ORDERS+EU` and `WORKER@EU`, subscription patterns, existing Core wildcard contracts and binary payloads remain supported.
+- Prevent password/token leakage through DEBUG logging of CONNECT. Handshake, reconnect, socket I/O and error diagnostics now pass safe metadata to PSR-3 loggers instead of credential-bearing objects, raw frames or payloads. This protects new log records; existing logs are not rewritten.
 
 ### Fixed
 
-- Apply `allowSelfSigned` to PHP's `allow_self_signed` stream option without lowering TLS security levels. Keep peer/name verification, CA, minimum TLS, ALPN and mTLS settings intact across reconnect/failover, reject unsupported sockets explicitly, and close/detach failed transports before retry.
+- `fetch(noWait: true)` now waits for asynchronous replies and returns a partial or empty batch on the server's terminating response. `expiresMs` bounds local waiting; a missing completion response raises `JetStreamTimeoutException`, even after partial delivery. Heartbeats, status-only HMSG, server errors and byte-limit completion are handled without returning service frames as messages.
+- Parse empty MSG payloads and fragmented MSG/HMSG without losing frame boundaries. Preserve HMSG status metadata and ordinary headers containing `NATS/`, URLs or multiple colons, including repeated values in order, binary payloads and original body sizes.
+- Keep Core and JetStream HPUB lengths consistent with the current mutable header bag. Queue accounting, socket writes and ordinary write retries use the same serialized frame captured at enqueue time.
+- Derive `getDeliveryCount()` from classic or expanded JetStream ACK subjects, independently of user `Nats-Num-Delivered` headers and opaque extension tokens. Missing or invalid counts remain `null`; automatic DROP_NEW termination applies only to dropped messages with a known count greater than five.
+- Handle repeated INFO as server/discovery updates without another CONNECT, handshake PING, readiness transition or subscription replay. A new transport still performs its own handshake, and a delayed reader from an old connection cannot close its replacement.
+- Apply TLS `allowSelfSigned` to PHP's `allow_self_signed` option without lowering the security level. With `verifyPeer=true`, certificate validity and server-name checks remain enabled; CA, minimum TLS, ALPN and mTLS settings are preserved across reconnect/failover. Unsupported sockets fail explicitly, and failed transports are closed before retry.
+- Validate known Admin JSON fields against their original token types, including numeric values outside PHP int. Preserve absent versus empty stream subjects, legacy array-only transport compatibility and exact configuration snapshots; malformed responses cannot silently change stream routing during an update.
+- Restore isolated Docker test setup and reliable cleanup.
 
-- Process asynchronous INFO as server/topology updates without repeating CONNECT or handshake PING. Client owns handshake state per transport, preserving readiness, subscription replay order, ping monitoring and safe logs across updates and handshake-write failures.
-
-- Read JetStream delivery counts from validated classic or domain/account ACK subjects for MSG and HMSG, independently of opaque extension tokens including numeric tails. User `Nats-Num-Delivered` headers no longer influence automatic DROP_NEW termination; malformed or overflowing metadata yields an unknown count without interrupting message delivery.
-
-- Preserve ordinary HMSG headers containing `NATS/`, URLs and multiple colons, including repeated values in their original order. Recognize only the first, valid `NATS/1.0` preamble as protocol metadata while retaining separate statuses and received body sizes.
-
-- Wait for asynchronous JetStream `fetch(noWait: true)` replies and server completion instead of removing the inbox immediately. Keep a separate local timeout, preserve HMSG status codes/descriptions (including status-only frames), handle heartbeat and byte-limit completion, and clean up each request independently on success or failure.
-
-- Keep Core and JetStream HPUB lengths consistent with mutable header bags, and send/retry the exact serialized frame captured at enqueue time so wire bytes and queue byte accounting remain aligned.
-- Prevent connection credentials from reaching protocol logs before PSR-3 formatting. In previous versions, enabling DEBUG with the standard formatter could write connection credentials from CONNECT messages; handshake, reconnect, socket I/O, and error logs now use safe metadata without raw frames or payloads.
-- Preserve valid JetStream resource names such as `ORDERS@EU`, `ORDERS+EU`, and `WORKER@EU` by separating command-token safety checks from the existing Core publish subject rules.
-- Reject invalid JetStream stream and durable consumer names before API requests or pull inbox subscriptions. Validate outgoing PUB/HPUB subjects and reply-to fields, including direct transport frames, and reject trailing newlines in SUB/UNSUB command fields to prevent NATS command injection. Binary payloads and existing subscription patterns remain supported.
-
-### Notes
-
-- Applications locking `amphp/byte-stream` to `2.1.2` or earlier must update it together with the driver when upgrading to `1.2.1`.
+For full details and upgrade guidance, see [RELEASE_NOTES_1.3.0.md](RELEASE_NOTES_1.3.0.md).
 
 ## [1.2.0] - 2026-03-27
 
