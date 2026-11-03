@@ -285,3 +285,21 @@ operation therefore times out with an uncertain outcome; it is not retried. A
 subsequent INFO through that import succeeds and can inspect the changed state.
 Local and domain-prefixed RESET work on 2.14.0; the same import roundtrip works on
 2.15.2. This observation is not used as a driver capability rule.
+
+## Sources and mirrors (1.4.0)
+
+See [typed sources, mirrors and consumer ownership](jetstream-sources.md) for configuration, API level checks, update/removal, actual link state and independent delivery verification.
+
+## Replica placement (1.4.0)
+
+The optional `JetStreamPlacementAdminInterface` adds explicit cancellation and
+evacuation, with separate INFO-only observation of completion. See
+[replica placement](jetstream-placement.md) for API level 5 admission, rollback
+semantics, system-account scope and uncertain results.
+
+## Streaming backup and recovery (1.4.0)
+
+The optional `JetStreamBackupAdminInterface` adds `backupStream()` and
+`restoreStream()` without changing `JetStreamAdminInterface`. See
+[V2 backup and recovery](jetstream-backup.md) for stream ownership, exact
+metadata persistence, deadlines, consumer recovery and uncertain outcomes.

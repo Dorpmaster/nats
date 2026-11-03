@@ -434,3 +434,41 @@ integration-jetstream-fast: build
 .PHONY: integration-jetstream-fast-cluster
 integration-jetstream-fast-cluster: build
 	python3 tests/Support/run-jetstream-fast.py --cluster
+
+.PHONY: integration-jetstream-schedules
+integration-jetstream-schedules: build
+	python3 tests/Support/run-jetstream-schedules.py
+
+.PHONY: integration-jetstream-sources
+integration-jetstream-sources: build
+	python3 tests/Support/run-jetstream-sources.py
+
+.PHONY: integration-jetstream-sources-cluster
+integration-jetstream-sources-cluster: build
+	python3 tests/Support/run-jetstream-sources.py --cluster
+
+.PHONY: integration-jetstream-sources-external
+integration-jetstream-sources-external: build
+	python3 tests/Support/run-jetstream-sources-external.py
+
+.PHONY: integration-jetstream-placement
+integration-jetstream-placement: build
+	python3 tests/Support/run-jetstream-placement.py
+
+.PHONY: integration-jetstream-placement-cluster
+integration-jetstream-placement-cluster: build
+	python3 tests/Support/run-jetstream-placement.py --cluster
+
+.PHONY: integration-jetstream-placement-tcp
+integration-jetstream-placement-tcp: build
+	docker run --rm nats-client vendor/bin/phpunit --fail-on-skipped tests/Integration/JetStreamPlacementWriteConformanceTest.php
+
+.PHONY: integration-jetstream-backup integration-jetstream-backup-cluster integration-jetstream-backup-tcp
+integration-jetstream-backup: build
+	python3 tests/Support/run-jetstream-archive.py
+
+integration-jetstream-backup-cluster: build
+	python3 tests/Support/run-jetstream-archive.py --cluster
+
+integration-jetstream-backup-tcp: build
+	docker run --rm nats-client vendor/bin/phpunit --fail-on-skipped tests/Integration/JetStreamArchiveWriteConformanceTest.php

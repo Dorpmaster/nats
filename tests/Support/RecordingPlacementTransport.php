@@ -1,0 +1,83 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Dorpmaster\Nats\Tests\Support;
+
+use Dorpmaster\Nats\Domain\Client\ClientInterface;
+use Dorpmaster\Nats\Domain\Client\SubscriptionIdHelperInterface;
+use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilities;
+use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilitiesProviderInterface;
+use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
+use Dorpmaster\Nats\Domain\JetStream\Model\JsonObject;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamConnectionBoundTransportInterface;
+
+/** Explicit test evidence only; these records are never passed to the production logger. */
+final class RecordingPlacementTransport implements JetStreamConnectionBoundTransportInterface, JetStreamCapabilitiesProviderInterface
+{
+    /** @var list<array<string, mixed>> */
+    public array $records = [];
+
+    public function __construct(private JetStreamControlPlaneTransport $inner)
+    {
+    }
+
+    public function getCapabilities(): JetStreamCapabilities
+    {
+        return $this->inner->getCapabilities();
+    }
+
+    public function getClient(): ClientInterface
+    {
+        return $this->inner->getClient();
+    }
+
+    public function getSubscriptionIdHelper(): SubscriptionIdHelperInterface
+    {
+        return $this->inner->getSubscriptionIdHelper();
+    }
+
+    public function request(string $apiSubjectSuffix, array $payload, int|null $timeoutMs = null): array
+    {
+        return $this->inner->request($apiSubjectSuffix, $payload, $timeoutMs);
+    }
+
+    public function publishRequest(string $apiSubjectSuffix, array $payload, string $replyTo, array $headers = []): void
+    {
+        $this->inner->publishRequest($apiSubjectSuffix, $payload, $replyTo, $headers);
+    }
+
+    public function requestJson(string $apiSubjectSuffix, JsonObject $payload, int|null $timeoutMs = null): JsonObject
+    {
+        return $this->inner->requestJson($apiSubjectSuffix, $payload, $timeoutMs);
+    }
+
+    public function requestJsonOnConnection(string $suffix, JsonObject $payload, int $connectionId, int $timeoutMs, \Amp\Cancellation|null $cancellation = null): JsonObject
+    {
+        $index           = count($this->records);
+        $this->records[] = ['subject' => $this->getCapabilities()->apiPrefix . '.' . $suffix, 'body' => $payload->toJson(), 'timeout_ms' => $timeoutMs, 'connection_id' => $connectionId];
+        try {
+            $response                          = $this->inner->requestJsonOnConnection($suffix, $payload, $connectionId, $timeoutMs, $cancellation);
+            $this->records[$index]['response'] = $response->toJson();
+            return $response;
+        } catch (\Throwable $error) {
+            $this->records[$index]['error'] = ['type' => $error::class,'code' => $error instanceof JetStreamApiException ? $error->getApiCode() : 0,'err_code' => $error instanceof JetStreamApiException ? $error->getErrorCode() : null];
+            throw $error;
+        }
+    }
+
+    public function requestJsonOnce(string $apiSubjectSuffix, JsonObject $payload, int|null $timeoutMs = null): JsonObject
+    {
+        $index           = count($this->records);
+        $this->records[] = ['subject' => $this->getCapabilities()->apiPrefix . '.' . $apiSubjectSuffix, 'body' => $payload->toJson(), 'timeout_ms' => $timeoutMs];
+        try {
+            $response                          = $this->inner->requestJsonOnce($apiSubjectSuffix, $payload, $timeoutMs);
+            $this->records[$index]['response'] = $response->toJson();
+            return $response;
+        } catch (JetStreamApiException $error) {
+            $this->records[$index]['error'] = ['code' => $error->getApiCode(), 'err_code' => $error->getErrorCode(), 'description' => $error->getDescription()];
+            throw $error;
+        }
+    }
+}

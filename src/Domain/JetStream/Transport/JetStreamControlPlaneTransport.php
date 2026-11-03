@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Dorpmaster\Nats\Domain\JetStream\Transport;
 
+use Amp\Cancellation;
+use Dorpmaster\Nats\Domain\Client\ConnectionBoundRequestClientInterface;
+use Dorpmaster\Nats\Protocol\Contracts\StatusMessageInterface;
 use Dorpmaster\Nats\Client\SubscriptionIdHelper;
 use Dorpmaster\Nats\Domain\Client\ClientInterface;
 use Dorpmaster\Nats\Domain\Client\SingleAttemptRequestClientInterface;
@@ -12,6 +15,7 @@ use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilities;
 use Dorpmaster\Nats\Domain\JetStream\Capability\JetStreamCapabilitiesProviderInterface;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Internal\ApiError;
+use Dorpmaster\Nats\Domain\JetStream\Internal\PlacementResponseException;
 use Dorpmaster\Nats\Domain\JetStream\Model\JsonObject;
 use Dorpmaster\Nats\Protocol\Header\HeaderBag;
 use Dorpmaster\Nats\Protocol\Internal\ValidatePublishTokens;
@@ -21,7 +25,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use stdClass;
 
-final readonly class JetStreamControlPlaneTransport implements JetStreamSingleAttemptTransportInterface, JetStreamCapabilitiesProviderInterface
+final readonly class JetStreamControlPlaneTransport implements JetStreamConnectionBoundTransportInterface, JetStreamCapabilitiesProviderInterface
 {
     use ValidatePublishTokens;
 
@@ -77,6 +81,8 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamSingleAt
 
     public function requestJson(string $apiSubjectSuffix, JsonObject $payload, int|null $timeoutMs = null): JsonObject
     {
+        $this->validatePublishTokens($apiSubjectSuffix);
+        $this->rejectReplayablePlacement($apiSubjectSuffix);
         // Mutating delivery/configuration state must not become replayable through direct transport calls either.
         return $this->performJsonRequest($apiSubjectSuffix, $payload, $timeoutMs, str_starts_with($apiSubjectSuffix, 'STREAM.UPDATE.') || str_starts_with($apiSubjectSuffix, 'CONSUMER.RESET.'));
     }
@@ -86,19 +92,32 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamSingleAt
         return $this->performJsonRequest($apiSubjectSuffix, $payload, $timeoutMs, true);
     }
 
-    private function performJsonRequest(string $apiSubjectSuffix, JsonObject $payload, int|null $timeoutMs, bool $once): JsonObject
+    public function requestJsonOnConnection(string $suffix, JsonObject $payload, int $connectionId, int $timeoutMs, Cancellation|null $cancellation = null): JsonObject
+    {
+        return $this->performJsonRequest($suffix, $payload, $timeoutMs, true, $connectionId, $cancellation);
+    }
+
+    private function performJsonRequest(string $apiSubjectSuffix, JsonObject $payload, int|null $timeoutMs, bool $once, int|null $connectionId = null, Cancellation|null $cancellation = null): JsonObject
     {
         $this->validatePublishTokens($apiSubjectSuffix);
         if ($once && !$this->client instanceof SingleAttemptRequestClientInterface) {
             throw new JetStreamApiException(0, 'Single-attempt JetStream requests require SingleAttemptRequestClientInterface');
         }
+        if ($connectionId !== null && !$this->client instanceof ConnectionBoundRequestClientInterface) {
+            throw new JetStreamApiException(0, 'Tracked JetStream requests require ConnectionBoundRequestClientInterface');
+        }
         $subject = $this->apiPrefix . '.' . $apiSubjectSuffix;
         $this->logger->debug('js.control.request', ['subject' => $subject, 'timeout_ms' => $timeoutMs]);
         $replyTo = self::REPLY_PREFIX . $this->subscriptionIdHelper->generateId();
         $message = new JetStreamControlPlaneRequestMessage($subject, $payload->toJson(), $replyTo);
-        $result  = $once
+        $result  = $connectionId !== null
+            ? $this->client->requestOnceOnConnection($message, $connectionId, ($timeoutMs ?? 2000) / 1000, $cancellation)
+            : ($once
             ? $this->client->requestOnce($message, $timeoutMs === null ? 30 : $timeoutMs / 1000)
-            : ($timeoutMs === null ? $this->client->request($message) : $this->client->request($message, $timeoutMs / 1000));
+            : ($timeoutMs === null ? $this->client->request($message) : $this->client->request($message, $timeoutMs / 1000)));
+        if ($connectionId !== null && $result instanceof StatusMessageInterface && ($status = $result->getStatus()) !== null) {
+            throw new JetStreamApiException($status->code, $status->description);
+        }
         if (!method_exists($result, 'getPayload')) {
             throw new JetStreamApiException(0, 'JetStream API response message does not provide payload');
         }
@@ -120,10 +139,19 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamSingleAt
                 'err_code' => $error->getErrorCode(),
                 'error_type' => $error::class,
             ]);
-            throw $error;
+            throw $connectionId === null ? $error : new PlacementResponseException($decoded, $error);
         }
         $this->logger->debug('js.control.response', ['subject' => $subject, 'ok' => true]);
         return $decoded;
+    }
+
+    private function rejectReplayablePlacement(string $suffix): void
+    {
+        $command = '(?:STREAM\.(?:CANCEL_MOVE|PEER\.EVACUATE)\.|CONSUMER\.PEER\.EVACUATE\.|SERVER\.EVACUATE(?:\z|\.))';
+        $subject = $this->apiPrefix . '.' . $suffix;
+        if (preg_match('/\A' . $command . '/', $suffix) === 1 || preg_match('/\A\$JS\.(?:[^.]+\.)?API\.' . $command . '/', $subject) === 1) {
+            throw new JetStreamApiException(0, 'Placement commands require a connection-bound single attempt; use JetStreamPlacementAdminInterface');
+        }
     }
 
     public function publishRequest(
@@ -133,6 +161,7 @@ final readonly class JetStreamControlPlaneTransport implements JetStreamSingleAt
         array $headers = [],
     ): void {
         $this->validatePublishTokens($apiSubjectSuffix);
+        $this->rejectReplayablePlacement($apiSubjectSuffix);
 
         $subject = $this->apiPrefix . '.' . $apiSubjectSuffix;
         $body    = $payload === [] ? new stdClass() : $payload;

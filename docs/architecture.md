@@ -201,3 +201,15 @@ WriteBuffer consumes the attempt immediately before socket send and reports writ
 completion after releasing frame accounting. No fast frame enters reconnect
 replay; legacy interfaces retain their behavior. See
 [streaming publication](jetstream-fast-batch.md).
+
+## Lossless archive protocol inboxes
+
+`ConnectionBoundProtocolClientInterface` is an optional extension of the existing
+streaming client. Its private callbacks run inline in wire order, must not block
+and must use an owner-bounded receive buffer. They bypass application slow-consumer
+policies and the application callback scheduler; a thrown callback error fails
+its channel. Client removes the protocol SID on cleanup and pins it to the
+original connection generation. JetStream archive operations require this
+capability instead of accepting silent application-message drops. Existing
+application SUB dispatch and ordinary streaming publication channels retain
+their scheduling and DROP_NEW/ERROR behavior.

@@ -13,6 +13,7 @@ use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamApiException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamConfigurationUnconfirmedException;
 use Dorpmaster\Nats\Domain\JetStream\Exception\JetStreamTimeoutException;
 use Dorpmaster\Nats\Domain\JetStream\Internal\ResourceName;
+use Dorpmaster\Nats\Domain\JetStream\Internal\StreamSourceAdmission;
 use Dorpmaster\Nats\Domain\JetStream\Internal\ApiError;
 use Dorpmaster\Nats\Domain\JetStream\Internal\Decimal;
 use Dorpmaster\Nats\Domain\JetStream\Internal\MetadataFields;
@@ -25,6 +26,7 @@ use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfig;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamConfigPatch;
 use Dorpmaster\Nats\Domain\JetStream\Model\StreamInfo;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransportInterface;
+use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamControlPlaneTransport;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamJsonTransportInterface;
 use Dorpmaster\Nats\Domain\JetStream\Transport\JetStreamSingleAttemptTransportInterface;
 use InvalidArgumentException;
@@ -32,7 +34,7 @@ use JsonException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
-final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, JetStreamResettingAdminInterface, JetStreamCapabilitiesProviderInterface
+final readonly class JetStreamAdmin implements JetStreamBackupAdminInterface, JetStreamPlacementAdminInterface, JetStreamUpdatingAdminInterface, JetStreamResettingAdminInterface, JetStreamCapabilitiesProviderInterface
 {
     public function __construct(
         private JetStreamControlPlaneTransportInterface $transport,
@@ -47,9 +49,76 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
             : new JetStreamCapabilities(new \Dorpmaster\Nats\Domain\Client\ServerInformation());
     }
 
+    private function archives(): \Dorpmaster\Nats\Domain\JetStream\Backup\ArchiveOperations
+    {
+        return new \Dorpmaster\Nats\Domain\JetStream\Backup\ArchiveOperations($this->transport, $this->getLogger(), fn (JsonObject $raw): StreamInfo => $this->mapStreamInfo($raw));
+    }
+    public function backupStream(mixed $stream, \Amp\ByteStream\WritableStream $output, \Dorpmaster\Nats\Domain\JetStream\Backup\BackupOptions|null $options = null, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Backup\StreamBackupMetadata
+    {
+        if (!is_string($stream)) {
+            throw new InvalidArgumentException('Invalid stream: expected string');
+        }
+        return $this->archives()->backup($stream, $output, $options ?? new \Dorpmaster\Nats\Domain\JetStream\Backup\BackupOptions(), $timeoutMs, $cancellation);
+    }
+    public function restoreStream(mixed $destination, \Amp\ByteStream\ReadableStream $input, \Dorpmaster\Nats\Domain\JetStream\Backup\StreamBackupMetadata $backup, mixed $storage, \Dorpmaster\Nats\Domain\JetStream\Backup\RestoreOptions|null $options = null, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        if (!is_string($destination)) {
+            throw new InvalidArgumentException('Invalid destination: expected string');
+        }
+        if (!is_string($storage)) {
+            throw new InvalidArgumentException('Invalid storage: expected file or memory');
+        }
+        return $this->archives()->restore($destination, $input, $backup, $storage, $options ?? new \Dorpmaster\Nats\Domain\JetStream\Backup\RestoreOptions(), $timeoutMs, $cancellation);
+    }
+
+    private function placement(): \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations
+    {
+        return new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations($this->transport, $this->getLogger(), fn (JsonObject $raw): StreamInfo => $this->mapStreamInfo($raw), fn (JsonObject $raw): ConsumerInfo => $this->mapConsumerInfo($raw));
+    }
+    public function cancelStreamMove(mixed $stream, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        $stream = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($stream, 'stream');
+        return $this->placement()->execute('stream_cancel_move', ['stream' => $stream], $timeoutMs, $cancellation);
+    }
+    public function evacuateStreamPeer(mixed $stream, mixed $peer, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Model\PlacementAck
+    {
+        $stream = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($stream, 'stream');
+        \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::peer($peer);
+        return $this->placement()->execute('stream_peer_evacuate', ['stream' => $stream,'peer' => $peer], $timeoutMs, $cancellation);
+    }
+    public function evacuateConsumerPeer(mixed $stream, mixed $consumer, mixed $peer, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Model\PlacementAck
+    {
+        $stream   = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($stream, 'stream');
+        $consumer = \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::resource($consumer, 'consumer');
+        \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::peer($peer);
+        return $this->placement()->execute('consumer_peer_evacuate', ['stream' => $stream,'consumer' => $consumer,'peer' => $peer], $timeoutMs, $cancellation);
+    }
+    public function evacuateServer(mixed $peer = null, mixed $peerId = null, mixed $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): \Dorpmaster\Nats\Domain\JetStream\Model\PlacementAck
+    {
+        if (($peer === null) === ($peerId === null)) {
+            throw new InvalidArgumentException('Specify exactly one of peer or peerId');
+        }
+        \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementOperations::peer($peer ?? $peerId, $peer === null ? 'peerId' : 'peer');
+        return $this->placement()->execute('server_evacuate', $peer === null ? ['peer_id' => $peerId] : ['peer' => $peer], $timeoutMs, $cancellation);
+    }
+    public function waitForStreamEvacuation(string $stream, string $peerName, int $expectedReplicas, int|null $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        return (new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementObserver($this->placement()))->evacuate($stream, null, $peerName, $expectedReplicas, $timeoutMs, $cancellation);
+    }
+    public function waitForConsumerEvacuation(string $stream, string $consumer, string $peerName, int $expectedReplicas, int|null $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): ConsumerInfo
+    {
+        return (new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementObserver($this->placement()))->evacuate($stream, $consumer, $peerName, $expectedReplicas, $timeoutMs, $cancellation);
+    }
+    public function waitForStreamRollback(StreamInfo $transition, StreamInfo $original, int|null $timeoutMs = null, \Amp\Cancellation|null $cancellation = null): StreamInfo
+    {
+        return (new \Dorpmaster\Nats\Domain\JetStream\Internal\PlacementObserver($this->placement()))->rollback($transition, $original, $timeoutMs, $cancellation);
+    }
+
     public function createStream(StreamConfig $config): StreamInfo
     {
         ResourceName::validate($config->getName(), 'stream');
+        $payload = $config->toRequestPayload();
+        $this->sourceAdmission()->verify(JsonObject::fromArray($payload));
 
         $this->getLogger()->info('js.admin.stream.create', [
             'stream' => $config->getName(),
@@ -59,7 +128,7 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         try {
             $response = $this->streamRequest(
                 sprintf('STREAM.CREATE.%s', $config->getName()),
-                $config->toRequestPayload(),
+                $payload,
             );
         } catch (\Throwable $exception) {
             $this->getLogger()->warning('js.admin.stream.create.failed', [
@@ -75,6 +144,10 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
             'allow_atomic' => $config->getAllowAtomicPublish(),
             'allow_batched' => $config->getAllowBatchPublish(),
             'max_consumers' => $config->getMaxConsumers(),
+            'allow_msg_schedules' => $config->getAllowMessageSchedules(),
+            'allow_msg_ttl' => $config->getAllowMessageTtl(),
+            'mirror' => $payload['mirror'] ?? null,
+            'sources' => $payload['sources'] ?? null,
         ], static fn (mixed $value): bool => $value !== null));
         $this->getLogger()->debug('js.admin.stream.create.success', [
             'operation' => 'stream_create',
@@ -143,9 +216,12 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
             }
             $configuration = $current->getConfiguration();
             assert($configuration !== null);
+            StreamSourceAdmission::validateSnapshot($configuration, $current->getResponse());
+            $effective = $configuration->withFields($fields);
+            $this->sourceAdmission($remaining)->verify($effective, $configuration);
             $response = $this->transport->requestJsonOnce(
                 'STREAM.UPDATE.' . $stream,
-                $configuration->withFields($fields),
+                $effective,
                 $remaining(),
             );
             $remaining();
@@ -194,6 +270,9 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
     {
         ResourceName::validate($stream, 'stream');
         ResourceName::validate($config->getDurableName(), 'consumer');
+        if ($config->getAckPolicy() === 'flow_control') {
+            $this->sourceAdmission()->requireSupport();
+        }
 
         $this->getLogger()->info('js.admin.consumer.create', [
             'stream' => $stream,
@@ -219,6 +298,17 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         }
 
         $info = $this->mapConsumerInfo($response);
+        if ($config->getAckPolicy() === 'flow_control') {
+            try {
+                $raw    = $info->getConfiguration() ?? new JsonObject('{}');
+                $actual = new MetadataFields($raw, 'consumer.config');
+                if ($info->getStreamName() !== $stream || $info->getName() !== $config->getDurableName() || $info->getDurableName() !== $config->getDurableName() || ($raw->has('name') && $actual->text('name') !== $config->getDurableName()) || $actual->text('ack_policy') !== 'flow_control' || $actual->text('deliver_subject') !== $config->toRequestPayload()['deliver_subject'] || $actual->boolean('flow_control') !== true || $actual->decimal('idle_heartbeat') !== '1000000000') {
+                    throw new JetStreamApiException(0, 'Requested flow_control push consumer configuration is unconfirmed');
+                }
+            } catch (InvalidArgumentException | JsonException $error) {
+                throw new JetStreamApiException(0, 'Invalid flow_control consumer metadata: ' . $error->getMessage(), $error);
+            }
+        }
         $this->getLogger()->debug('js.admin.consumer.create.success', [
             'stream' => $stream,
             'operation' => 'consumer_create',
@@ -363,17 +453,12 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
             if ($configuration === null) {
                 throw new JetStreamApiException(0, 'JetStream stream response does not contain config object');
             }
+            StreamSourceAdmission::validateSnapshot($configuration);
             $name = (new MetadataFields($configuration, 'config'))->text('name');
             if ($name === null || $name === '') {
                 throw new JetStreamApiException(0, 'JetStream stream response does not contain valid stream name');
             }
-            // This schema requires strings: never let JSON_BIGINT_AS_STRING disguise numeric elements.
-            $subjects = $configuration->has('subjects')
-                ? json_decode($configuration->getRawValue('subjects'), false, 512, JSON_THROW_ON_ERROR)
-                : [];
-            if (!is_array($subjects) || !array_is_list($subjects) || array_filter($subjects, static fn (mixed $subject): bool => !is_string($subject)) !== []) {
-                throw new JetStreamApiException(0, 'JetStream stream response contains invalid subjects list');
-            }
+            $subjects = \Dorpmaster\Nats\Domain\JetStream\Internal\StreamSubjects::read($configuration);
             return new StreamInfo($name, $subjects, $configuration, $raw);
         } catch (InvalidArgumentException | JsonException $error) {
             throw new JetStreamApiException(0, 'Invalid JetStream stream metadata: ' . $error->getMessage(), $error);
@@ -383,12 +468,12 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
     /** @param array<string, mixed> $payload
      * @return array<string, mixed>|JsonObject
      */
-    private function streamRequest(string $suffix, array $payload): array|JsonObject
+    private function streamRequest(string $suffix, array $payload, int|null $timeoutMs = null): array|JsonObject
     {
         try {
             return $this->transport instanceof JetStreamJsonTransportInterface
-                ? $this->transport->requestJson($suffix, JsonObject::fromArray($payload))
-                : $this->transport->request($suffix, $payload);
+                ? $this->transport->requestJson($suffix, JsonObject::fromArray($payload), $timeoutMs)
+                : $this->transport->request($suffix, $payload, $timeoutMs);
         } catch (JsonException $error) {
             throw new JetStreamApiException(0, 'Failed to encode JetStream API request payload as JSON', $error);
         }
@@ -401,6 +486,13 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         $unconfirmed   = [];
         foreach ($fields as $field => $expected) {
             $actual = $configuration?->get($field);
+            if ($field === 'mirror' || $field === 'sources') {
+                if (($field === 'sources' && $expected === [] && $actual === null) || $this->containsConfiguration($actual, $expected)) {
+                    continue;
+                }
+                $unconfirmed[] = $field;
+                continue;
+            }
             // NATS omits false boolean fields and normalizes max_consumers=0 to -1.
             $actual = !$configuration?->has($field) && is_bool($expected) ? false : $actual;
             if ($actual === $expected || ($field === 'max_consumers' && $expected === 0 && $actual === -1)) {
@@ -411,6 +503,50 @@ final readonly class JetStreamAdmin implements JetStreamUpdatingAdminInterface, 
         if ($unconfirmed !== []) {
             throw new JetStreamConfigurationUnconfirmedException($info, $unconfirmed);
         }
+    }
+
+    private function sourceAdmission(\Closure|null $remaining = null): StreamSourceAdmission
+    {
+        return new StreamSourceAdmission(
+            $this->getCapabilities(),
+            fn (string $suffix, array $payload): array|JsonObject => $this->streamRequest($suffix, $payload, $remaining === null ? 2000 : $remaining()),
+            fn (string $prefix, string $suffix, array $payload): JsonObject => (new JetStreamControlPlaneTransport(
+                $this->transport->getClient(),
+                $this->transport->getSubscriptionIdHelper(),
+                $this->getLogger(),
+                $prefix,
+            ))->requestJson($suffix, JsonObject::fromArray($payload), $remaining === null ? 2000 : $remaining()),
+        );
+    }
+
+    /** Confirm requested fields while tolerating server-added nested metadata. */
+    private function containsConfiguration(mixed $actual, mixed $expected, string $field = ''): bool
+    {
+        if ($field === 'opt_start_time' && is_string($actual) && is_string($expected)) {
+            try {
+                return \Dorpmaster\Nats\Domain\JetStream\Model\NanoTimestamp::fromRfc3339($actual)->getUnixNanoseconds() === \Dorpmaster\Nats\Domain\JetStream\Model\NanoTimestamp::fromRfc3339($expected)->getUnixNanoseconds();
+            } catch (InvalidArgumentException) {
+                return false;
+            }
+        }
+        if (!is_array($expected)) {
+            return $actual === $expected;
+        }
+        if (array_is_list($expected)) {
+            if (!is_array($actual) || count($actual) !== count($expected)) {
+                return false;
+            }
+        } elseif ($actual instanceof \stdClass) {
+            $actual = get_object_vars($actual);
+        } else {
+            return false;
+        }
+        foreach ($expected as $key => $value) {
+            if (!array_key_exists($key, $actual) || !$this->containsConfiguration($actual[$key], $value, (string) $key)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @param array<string, mixed>|JsonObject $response */

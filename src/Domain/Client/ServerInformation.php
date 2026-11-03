@@ -15,6 +15,7 @@ final readonly class ServerInformation
         public int|null $apiLevel = null,
         public int|null $connectionId = null,
         private Closure|null $isCurrent = null,
+        public int|null $maxPayload = null,
     ) {
     }
 

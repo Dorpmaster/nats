@@ -58,7 +58,10 @@ final readonly class JetStreamPublisher implements JetStreamAtomicPublisherInter
         PublishOptions|null $options = null,
         int|null $timeoutMs = null,
     ): PubAck {
-        $effectiveOptions   = $options ?? PublishOptions::create();
+        $effectiveOptions = $options ?? PublishOptions::create();
+        if ($effectiveOptions->getSchedule() !== null) {
+            return (new ScheduledPublisher($this->client, $this->getLogger()))->publish($subject, $payload, $effectiveOptions, $timeoutMs);
+        }
         $message            = $this->createRequestMessage($subject, $payload, $effectiveOptions);
         $effectiveTimeoutMs = $timeoutMs ?? self::DEFAULT_TIMEOUT_MS;
         $deadline           = microtime(true) + ($effectiveTimeoutMs / 1000);

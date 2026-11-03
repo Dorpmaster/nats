@@ -54,6 +54,24 @@ final readonly class MetadataFields
         }
     }
 
+    public function signedDecimal(string $field): string|null
+    {
+        $value = $this->raw->getRawValue($field);
+        if ($value === null || $value === 'null') {
+            return null;
+        }
+        if (preg_match('/\A-?(?:0|[1-9][0-9]*)\z/', $value) !== 1) {
+            $this->invalid($field);
+        }
+        $negative = str_starts_with($value, '-');
+        try {
+            $digits = Decimal::parse(ltrim($value, '-'), $negative ? '9223372036854775808' : Decimal::INT64_MAX);
+        } catch (InvalidArgumentException) {
+            $this->invalid($field);
+        }
+        return $negative && $digits !== '0' ? '-' . $digits : $digits;
+    }
+
     public function timestamp(string $field): NanoTimestamp|null
     {
         $value = $this->text($field);
